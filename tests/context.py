@@ -3,4 +3,6 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import BerryFluxDiag.berry_flux_diag
+import BerryFluxDiag.Overlaps
+import BerryFluxDiag.QEParser
+import BerryFluxDiag.VASPParser
