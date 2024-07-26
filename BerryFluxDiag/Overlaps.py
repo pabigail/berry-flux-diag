@@ -1,14 +1,9 @@
 #!/usr/bin/env python
 
 import numpy as np
-# import itertools
 import BerryFluxDiag.utils as utils
 from pymatgen.core.structure import Structure
-# from pymatgen.io.vasp.outputs import Wavecar, Kpoints, Potcar
 from pymatgen.util.coord_cython import pbc_shortest_vectors
-
-# from pymatgen.optimization.linear_assignment import LinearAssignment
-# from pymatgen.analysis.ferroelectricity.polarization import get_total_ionic_dipole
 
 
 class Overlaps:
@@ -179,52 +174,6 @@ class Overlaps:
             strings_sums.append(string_sum)
             strings_len.append(len(strings))
         return strings_sums, strings_len, dict_debug
-    
-    
-#     def get_ionic_pol_change_old(self):
-#         """ ionic part of polarization """
-        
-#         struct2 = self.np_struct
-#         struct1 = self.pol_struct
-        
-#         mask = get_mask(struct2, struct1)
-#         vecs, d_2 = pbc_shortest_vectors(struct2.lattice, 
-#                                      struct2.frac_coords, 
-#                                      struct1.frac_coords,
-#                                      mask, 
-#                                      return_d2=True, 
-#                                      lll_frac_tol=[0.4, 0.4, 0.4])
-#         lin = LinearAssignment(d_2)
-#         s = lin.solution
-#         species = [struct1[i].species_string for i in s]
-#         short_vecs = vecs[np.arange(len(s)), s]
-#         print(short_vecs)
-#         pol_change = np.array([0., 0., 0.])
-#         for v, sp in zip(short_vecs, species):
-#             pol_change += (v) * self.zval_dict[str(sp)]
-            
-#         print(pol_change)
-#         print((ECHARGE * 10**20) / struct2.lattice.volume)
-#         return (ECHARGE * 10**20 ) * pol_change / struct2.lattice.volume 
-
-
-#     def std_frac_coords_for_ionic_calc(self, struct):
-        
-#         # get_total_ionic_dipole() from pymatgen does not 
-#         # properly treat sites 0.0 = 1.0 in fractional coordinates, so 
-#         # use this to transform fractional ionic cooridates
-        
-#         frac_coords_for_ionic_calc = []
-#         for site in struct.frac_coords:
-#             new_site = []
-#             for coord in np.array(site):
-#                 if coord == 1.0:
-#                     new_site.append(0.0)
-#                 else:
-#                     new_site.append(coord)
-#             frac_coords_for_ionic_calc.append(new_site)
-#         return frac_coords_for_ionic_calc
-    
     
     
     # modified from pymatgen to use frac_coord as input, otherwise does not properly 
