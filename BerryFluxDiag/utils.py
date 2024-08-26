@@ -1,4 +1,5 @@
 import numpy as np
+import re
 
 
 ECHARGE = 1.60217733 * 10**-19
@@ -136,7 +137,8 @@ def map_coeffs(coeffs0, gvecs0, kpt0, coeffs1, gvecs1, kpt1):
     max_g_rad = np.max([np.max(gvec_max0), np.max(gvec_max1)])
     min_g_rad = np.abs(np.min([np.min(gvec_min0), np.min(gvec_min1)]))
     max_rad = int(np.max([max_g_rad, min_g_rad]))
-    base = int(np.max([gvec_base_exp0, gvec_base_exp1]))
+    # base = int(np.max([gvec_base_exp0, gvec_base_exp1]))
+    base = (2*max_rad + 1)
     
     coeffs0_mapped = np.zeros((len(coeffs0), base**3 + base**2 + base + 1), dtype=complex)
     coeffs1_mapped = np.zeros((len(coeffs1), base**3 + base**2 + base + 1), dtype=complex)
@@ -152,3 +154,10 @@ def map_coeffs(coeffs0, gvecs0, kpt0, coeffs1, gvecs1, kpt1):
         coeffs1_mapped[:, mapped_i] = coeffs1[:, i]
         
     return coeffs0_mapped, coeffs1_mapped
+
+def extract_letters(input_string):
+    # Use a regular expression to match only the letters at the beginning of the string
+    match = re.match(r'^[A-Za-z]+', input_string)
+    if match:
+        return match.group(0)
+    return ''

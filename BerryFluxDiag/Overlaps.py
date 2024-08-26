@@ -24,11 +24,22 @@ class Overlaps:
         self.pol_wfcn_dict = parse_dict['pol_wfcn_dict']
         self.np_wfcn_dict = parse_dict['np_wfcn_dict']
         self.kpoint_list = parse_dict['kpoint_list']
-        self.band_fill = np.min([parse_dict['pol_band_fill'], 
-                                 parse_dict['np_band_fill']]) # changed this from np.max to np.min
+#         self.band_fill = np.min([parse_dict['pol_band_fill'], 
+#                                  parse_dict['np_band_fill']]) # changed this from np.max to np.min
         self.zval_dict = parse_dict['zval_dict']
         self.eig_thresh = 2.8
         self.ES_code = parse_dict['ES_code']
+        self.spin_pol = parse_dict['spin_pol']
+        self.spin_state = 0 # this only matters for spin-polarized calculations
+
+        if self.spin_pol:
+            self.band_fill_up = np.min([parse_dict['pol_band_fill_up'],
+                                        parse_dict['np_band_fill_up']])
+            self.band_fill_down = np.min([parse_dict['pol_band_fill_down'],
+                                        parse_dict['np_band_fill_down']])
+        else:
+            self.band_fill = np.min([parse_dict['pol_band_fill'],
+                                     parse_dict['np_band_fill']])
     
     # calculate overlaps
     # NEED TO CHECK BEFORE WHETHER TO COMPUTE OVERLAP
@@ -81,18 +92,29 @@ class Overlaps:
         returns pww coefficients and gvecs corresponding to state (l, kpt)
         l = 0 is non-polar
         l = 1 is polar
+        
+        use self.state = 0 or 1 to extract proper spin-polarized unit
         '''
         # round k-point so matches indexing in kpoint dict
         kpt = np.around(kpt, 6)
-        
-        if l == 0:
-            pw_coeffs = self.np_wfcn_dict[tuple(kpt)]['wfcn']
-            gvecs = self.np_wfcn_dict[tuple(kpt)]['gvecs']
-        elif l == 1:
-            pw_coeffs = self.pol_wfcn_dict[tuple(kpt)]['wfcn']
-            gvecs = self.pol_wfcn_dict[tuple(kpt)]['gvecs']
-        
-        return pw_coeffs, gvecs                          
+
+        if self.spin_pol:
+            if l == 0:
+                pw_coeffs = self.np_wfcn_dict[tuple(kpt)]['wfcn'][self.spin_state]
+                gvecs = self.np_wfcn_dict[tuple(kpt)]['gvecs']
+            elif l == 1:
+                pw_coeffs = self.pol_wfcn_dict[tuple(kpt)]['wfcn'][self.spin_state]
+                gvecs = self.pol_wfcn_dict[tuple(kpt)]['gvecs']
+
+        else:
+            if l == 0:
+                pw_coeffs = self.np_wfcn_dict[tuple(kpt)]['wfcn']
+                gvecs = self.np_wfcn_dict[tuple(kpt)]['gvecs']
+            elif l == 1:
+                pw_coeffs = self.pol_wfcn_dict[tuple(kpt)]['wfcn']
+                gvecs = self.pol_wfcn_dict[tuple(kpt)]['gvecs']
+
+        return pw_coeffs, gvecs                         
     
     
     # get unitary along path
@@ -209,7 +231,7 @@ class Overlaps:
         # extract charge of ions from zval dict
         tot_ionic = []
         for site, frac_coord in zip(self.pol_struct, frac_coords_for_ion_calc):
-            zval = self.zval_dict[str(site.specie)]
+            zval = self.zval_dict[utils.extract_letters(str(site.specie))]
             tot_ionic.append(self.calc_ionic(frac_coord, self.pol_struct, zval))
         ion_diff =  np.sum(tot_ionic, axis=0) # in electron Angstroms:
         
@@ -247,27 +269,48 @@ class Overlaps:
     
     
     def compute_polarization(self):
-        
-        occ_fact = 2
-        strings_sum, strings_len, dict_debug = self.compute_string_sums()
-        print(f'string_sums: {strings_sum}')
-        
-        elec_change = [occ_fact * strings_sum[0] / strings_len[0],
-                       occ_fact * strings_sum[1] / strings_len[1],
-                       occ_fact * strings_sum[2] / strings_len[2]]
-        
-        
+
+        if self.spin_pol:
+
+            self.spin_state = 0
+            self.band_fill = self.band_fill_up
+            strings_sum_up, strings_len_up, dict_debug_up = self.compute_string_sums()
+            print(f'string_sums_up: {strings_sum_up}')
+
+            self.spin_state = 1
+            self.band_fill = self.band_fill_down
+            strings_sum_down, strings_len_down, dict_debug_down = self.compute_string_sums()
+            print(f'string_sums_up: {strings_sum_down}')
+
+            occ_fact = 1
+            elec_change = [occ_fact*(strings_sum_up[0] + strings_sum_down[0])/strings_len_up[0],
+                           occ_fact*(strings_sum_up[1] + strings_sum_down[1])/strings_len_up[1],
+                           occ_fact*(strings_sum_up[2] + strings_sum_down[2])/strings_len_up[2]]
+
+            dict_debug = [dict_debug_up, dict_debug_down]
+
+        else:
+
+            strings_sum, strings_len, dict_debug = self.compute_string_sums()
+            print(f'string_sums: {strings_sum}')
+
+            occ_fact = 2
+            elec_change = [occ_fact * strings_sum[0] / strings_len[0],
+                           occ_fact * strings_sum[1] / strings_len[1],
+                           occ_fact * strings_sum[2] / strings_len[2]]
+
+
         # fractional coordinates
         final_pol = self.get_spont_pol(elec_change)
-        
+
         # normalization
         a, b, c = self.pol_struct.lattice.matrix
         a, b, c = a / np.linalg.norm(a), b / np.linalg.norm(b), c / np.linalg.norm(c)
-        
+
         P_norm = np.linalg.norm(a * final_pol[0] +
-                                b * final_pol[1] + 
+                                b * final_pol[1] +
                                 c * final_pol[2])
-        
+
         print(f'final_pol frac: {final_pol}')
         print(f'polarization: {P_norm} muC / cm^2')
         return P_norm, dict_debug
