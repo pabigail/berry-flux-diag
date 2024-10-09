@@ -1,0 +1,50 @@
+&CONTROL
+  calculation = 'scf'
+  prefix = 'CrO3_np_trans_1'
+  pseudo_dir = '/global/homes/p/pabigail/qe_pseudos/'
+  outdir = 'calculations_777/'
+  verbosity = 'high'
+  /
+ &SYSTEM
+  ibrav = 0
+  ecutwfc = 100
+  input_dft = 'pbe'
+  nat = 16
+  ntyp = 2
+  nosym = .TRUE.
+  noinv = .TRUE.
+  /
+  &ELECTRONS
+  conv_thr = 1.0d-08
+  mixing_beta = 0.7
+  mixing_mode = 'plain'
+  mixing_ndim = 8
+  diagonalization = 'david'
+  adaptive_thr = .TRUE.
+  /
+ATOMIC_SPECIES
+  Cr  51.9961 Cr_ONCV_PBE-1.0.upf
+  O  15.9994 O_ONCV_PBE-1.0.upf
+ATOMIC_POSITIONS crystal
+Cr 0.209564 0.017601 0.250000
+Cr 0.790436 0.517601 0.750000
+Cr 0.290436 0.942119 0.750000
+Cr 0.709564 0.442119 0.250000
+O 0.021692 0.761379 0.750000
+O 0.978308 0.261379 0.250000
+O 0.194264 0.811036 0.383593
+O 0.805736 0.311036 0.616407
+O 0.194264 0.811036 0.116407
+O 0.805736 0.311036 0.883593
+O 0.305736 0.148684 0.616407
+O 0.694264 0.648684 0.383593
+O 0.305736 0.148684 0.883593
+O 0.694264 0.648684 0.116407
+O 0.478308 0.198341 0.250000
+O 0.521692 0.698341 0.750000
+K_POINTS automatic
+  7 7 7 0 0 0
+CELL_PARAMETERS angstrom
+  5.851619 0.000000 0.000000
+  0.000000 4.569787 0.000000
+  0.000000 0.000000 9.571464
