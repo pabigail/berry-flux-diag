@@ -1,6 +1,7 @@
 from itertools import product
 import numpy as np
 from pymatgen.core.structure import Structure
+from pymatgen.core import Lattice
 from pymatgen.io.vasp import Poscar
 import re
 
