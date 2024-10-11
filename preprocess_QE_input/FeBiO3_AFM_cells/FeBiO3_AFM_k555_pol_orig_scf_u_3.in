@@ -1,0 +1,53 @@
+  &CONTROL
+  calculation = 'scf'
+  prefix = 'febio3_pol_orig'
+  pseudo_dir = '/global/homes/p/pabigail/pseudos_from_vrindaa/oncv-marton/'
+  outdir = 'calculations_k555_u_3/'
+  wfcdir = 'calculations_k555_u_3/'
+  verbosity = 'high'
+/
+&SYSTEM
+  ibrav = 0
+  ecutwfc = 100
+  input_dft = 'pbe'
+  nat = 10
+  ntyp = 4
+  nspin = 2
+!  occupation = 'smearing', smearing = 'gauss', degauss = 0.005
+  tot_magnetization = 0  ! round the number from total magnetization from VASP output. ex) 4.735 --> 5
+  starting_magnetization(1) = -1 ! typically the value between 0.3 and 0.7 seems to be good for convergence.
+  starting_magnetization(2) = 1
+/
+&ELECTRONS
+  mixing_beta = 0.7
+  conv_thr = 1d-08
+  adaptive_thr = .TRUE.
+  mixing_mode = 'plain'
+  mixing_ndim = 8
+  diagonalization = 'david'
+/
+ATOMIC_SPECIES
+  Fe1 55.845 Fe_ONCV_PBE-1.0.upf
+  Fe2 55.845 Fe_ONCV_PBE-1.0.upf
+  O  15.9994 O_ONCV_PBE-marton.upf
+  Bi 208.9804 Bi_ONCV_PBE-marton.upf
+ATOMIC_POSITIONS crystal
+  Fe1 0.984247 0.984247 0.984247
+  Fe2 0.484247 0.484247 0.484247
+  Bi 0.763104 0.763104 0.763104
+  Bi 0.263104 0.263104 0.263104
+  O 0.152131 0.301143 0.699850
+  O 0.301143 0.699850 0.152131
+  O 0.699850 0.152131 0.301143
+  O 0.652131 0.199850 0.801143
+  O 0.801143 0.652131 0.199850
+  O 0.199850 0.801143 0.652131
+K_POINTS automatic
+  5 5 5 0 0 0
+CELL_PARAMETERS angstrom
+  4.943528 -2.809688 0.002673
+  4.943528 2.809688 0.002673
+  3.344138 -0.000000 4.598867
+HUBBARD ortho-atomic
+U Fe1-3d 3.0
+U Fe2-3d 3.0
