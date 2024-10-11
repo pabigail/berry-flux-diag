@@ -7,11 +7,9 @@ to run example:
 - from the main folder run: python tests/test_BaTiO3_QE_no_spin_polarization.py
 
 to preprare QE input:
-- polar and non-polar reference structures need to be translated to minimize the maximal atomic displacement between the two structures
-- in &SYSTEM, need tags: nosym = .TRUE. and noinv = .TRUE.
-- wavefunctions need to be saved in hdf5 format 
-- see example for how to generate the optimal translation from preprocess_QE_example: (input POSCAR_pol_orig and POSCAR_np_orig -> output POSCAR_np_trans_1), and run scf calculation on POSCAR_pol_orig and POSCAR_np_trans_1
-- see example for how to generate QE.in file from POSCAR_np_trans_1 and POSCAR_pol_orig (this only works for non-magnetic materials at the moment, but can manually update .in file for magnetic materials and DFT+U calcs)
+- from VASP POSCAR -> QE input: see example on CrO3 (this only currently works for non-magnetic materials without DFT+U)
+- from QE input -> QE input: see example on FeBiO3 (this currently works only for spin-polarized wavefunctions with DFT+U corrections)
+- In general, need: (1) polar and non-polar reference structures need to be translated to minimize the maximal atomic displacement between the two structures, (2) nosym = .TRUE. and noinv = .TRUE. in &SYSTEM, and (3) wavefunctions need to be saved in hdf5 format
 
 to run bfd code need:
 - polar .xml file
