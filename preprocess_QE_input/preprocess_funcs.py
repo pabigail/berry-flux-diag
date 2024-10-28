@@ -280,18 +280,15 @@ def parse_qe_input(input_file):
 def write_qe_input(control_dict, system_dict, electron_dict, species_dict, kpoint_dict, hubbard_dict, structure, filename):
     
     def map_species_name(species_string):
-        # If the species has a '+' sign, we handle it by stripping '+' and keeping the number if present.
-        if '+' in species_string:
-            if species_string.endswith('+'):  # Handle cases like Be+ and Be3+
-                base_name = species_string.rstrip('+')
-                if base_name[-1].isdigit():  # Case like Be3+
-                    return base_name
-                else:  # Case like Be+
-                    return base_name
+        if species_string.endswith('+'):
+            # Remove the trailing '+' sign
+            base_name = species_string.rstrip('+')
+            # Check if the last character is a digit
+            if base_name[-1].isdigit():
+                return base_name  # Return the number without the '+'
             else:
-                return species_string  # No '+' present or doesn't match the pattern
-        else:
-            return species_string
+                return base_name + '1'  # Append '1' if no number precedes '+'
+        return species_string  # Return as-is if no trailing '+'
     
     with open(filename, 'w') as f:
         # Write CONTROL section
