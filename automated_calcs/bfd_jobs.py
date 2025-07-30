@@ -1,6 +1,6 @@
 from jobflow import job, Flow, Response
-import preprocess
 from context import BerryFluxDiag as bfd
+from bfd import preprocess
 import numpy as np
 import os
 from monty.serialization import dumpfn
