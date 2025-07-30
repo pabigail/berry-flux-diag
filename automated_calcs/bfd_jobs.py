@@ -1,6 +1,6 @@
 from jobflow import job, Flow, Response
-import preprocess
 from context import BerryFluxDiag as bfd
+from bfd import preprocess
 import numpy as np
 import os
 from monty.serialization import dumpfn
@@ -162,26 +162,36 @@ def compute_ionic_contrib(pol_struct: Structure, np_struct: Structure, zval_dict
 
 
 @job
-def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, max_disp=0.3):
+def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True, num_interps='auto', max_disp=0.3):
 
     structs = []
     
     # find translation that minimizes max atomic displacement between pol and np structs
-    pol_orig_struct, np_trans_1_struct, orig_max_disp, translation = preprocess.translate_poscars(pol_orig_POSCAR_file,
+    if translate:
+        pol_orig_struct, np_trans_struct, orig_max_disp, translation = preprocess.translate_poscars(pol_orig_POSCAR_file,
                                                                                                np_orig_POSCAR_file)
-    # if the max atomic displacement is larger than max_disp, then add interpolations
-    if orig_max_disp > max_disp:
-        num_interps = int(np.ceil(orig_max_disp/max_disp))
-        structs = pol_orig_struct.interpolate(np_trans_1_struct, num_interps, interpolate_lattices=True)
     else:
-        structs = [pol_orig_struct, np_trans_1_struct]
+        pol_orig_struct = Structure.from_file(pol_orig_POSCAR_file)
+        np_trans_struct = Structure.from_file(np_orig_POSCAR_file) 
+
+    # compute number of interpolated structures to ensure max atomic distance is below max_disp if num_interps not specified
+    if num_interps == 'auto':
+        num_interps = int(np.ceil(orig_max_disp/max_disp))
+    elif not isinstance(num_interps, int) or num_interps < 0:
+        raise TypeError("num_interps must be a non-negative integer or the string 'auto'")
+
+    # get interpolated structures if necessary
+    if orig_max_disp > max_disp:
+        structs = pol_orig_struct.interpolate(np_trans_struct, num_interps, interpolate_lattices=True)
+    else:
+        structs = [pol_orig_struct, np_trans_struct]
 
     adj_max_disp = preprocess.max_atomic_displacement_between_adjacent_structs(structs)
     
     return {
         "pol_orig_struct": pol_orig_struct,
         "np_orig_struct": Structure.from_file(np_orig_POSCAR_file),
-        "np_trans_struct": np_trans_1_struct,
+        "np_trans_struct": np_trans_struct,
         "structs": structs, 
         "orig_max_disp": orig_max_disp, 
         "adj_max_disp": adj_max_disp,
