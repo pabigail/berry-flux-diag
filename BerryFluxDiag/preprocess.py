@@ -86,6 +86,10 @@ def get_refined_oshift_max_a(st_a, st_b, grid_range=0.1):
 
 
 def calc_max_disp(struct_a, struct_b, trans):
+
+    if trans is None:
+        trans = np.array([0.0, 0.0, 0.0])
+    
     st_a_copy = struct_a.copy()
     st_a_copy.translate_sites(range(len(struct_a)),trans)
     max_disp = max(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords,
@@ -237,6 +241,19 @@ def translate_poscars(pol_POSCAR_file, np_POSCAR_file):
     np_trans_1_struct.to(filename=np_trans_1_POSCAR_file, fmt='POSCAR')
     
     return pol_struct, np_trans_1_struct, max_displacement, translation
+
+
+def translate_structs(pol_struct, np_struct, translation=None):
+
+    if translation is None:
+        max_disps = get_refined_oshift(np_struct, pol_struct)
+        sorted_max_disps = sorted(max_disps, key=lambda x: x[1])
+        translation = sorted_max_disps[0][0]
+
+    np_trans_struct = np_struct.copy()
+    np_trans_struct.translate_sites(range(len(np_trans_struct)), translation)
+
+    return np_trans_struct
 
 def make_one_translation_files(folder_path, pol_POSCAR_file, np_POSCAR_file, out_file):
     pol_POSCAR_file = folder_path+pol_POSCAR_file
