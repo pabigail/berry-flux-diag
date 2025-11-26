@@ -68,7 +68,7 @@ BerryFluxDiag offers four optional installation modes:
     ```
 3. VASP with atomate2 jobflows — [VASP\_atomate2]
     ```bash
-    pip install .[VASP_atomate]
+    pip install .[VASP_atomate22]
     ```
 4. All supported workflows — [all]
    ```bash
