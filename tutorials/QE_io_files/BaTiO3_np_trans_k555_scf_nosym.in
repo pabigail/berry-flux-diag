@@ -1,0 +1,40 @@
+&CONTROL
+  calculation = 'scf'
+  prefix = 'BaTiO3_np_trans'
+  pseudo_dir = '/global/homes/p/pabigail/qe_pseudos/'
+  outdir = 'calculations_555/'
+  verbosity = 'high'
+  /
+ &SYSTEM
+  ibrav = 0
+  ecutwfc = 100
+  input_dft = 'pbe'
+  nat = 5
+  ntyp = 3
+  nosym = .TRUE.
+  noinv = .TRUE.
+  /
+  &ELECTRONS
+  conv_thr = 1.0d-08
+  mixing_beta = 0.7
+  mixing_mode = 'plain'
+  mixing_ndim = 8
+  diagonalization = 'david'
+  adaptive_thr = .TRUE.
+  /
+ATOMIC_SPECIES
+  Ba  137.3270 Ba_ONCV_PBE-1.0.upf
+  O  15.9994 O_ONCV_PBE-1.0.upf
+  Ti  47.8670 Ti_ONCV_PBE-1.0.upf
+ATOMIC_POSITIONS crystal
+Ba 1.000000 1.000000 0.002800
+Ti 0.500000 0.500000 0.502800
+O 1.000000 0.500000 0.502800
+O 0.500000 1.000000 0.502800
+O 0.500000 0.500000 0.002800
+K_POINTS automatic
+  5 5 5 0 0 0
+CELL_PARAMETERS angstrom
+  4.035583 0.000000 0.000000
+  0.000000 4.035583 0.000000
+  0.000000 0.000000 4.035583

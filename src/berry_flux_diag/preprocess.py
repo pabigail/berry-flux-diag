@@ -6,7 +6,41 @@ from pymatgen.core import Structure, Lattice
 from pymatgen.io.vasp import Poscar
 import re
 
-# from Francesco
+
+def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
+                       num_interps = 'auto', MAX_DISP=0.3):
+
+    # find translation that minimizes max atomic displacement between pol and np structs
+    if translate:
+        np_trans_struct = translate_structs(pol_orig_struct, np_orig_struct)
+    else:
+        np_trans_struct = np_orig_struct
+    
+    orig_max_disp = calc_max_disp(pol_orig_struct, np_orig_struct)
+
+    # compute number of interpolated structures to ensure max atomic distance is below max_disp in num_interps is not specified
+    if num_interps == 'auto':
+        num_interps = int(np.ceil(orig_max_disp/MAX_DISP))
+    elif not isinstance(num_interps, int) or num_interps < 0:
+        raise TypeError("num_interps must be a non-negative integer or the string 'auto'")
+
+    if orig_max_disp > MAX_DISP:
+        structs = pol_orig_struct.interpolate(np_trans_struct, num_interps, interpolate_lattice=True)
+    else:
+        structs = [pol_orig_struct, np_trans_struct]
+
+    adj_max_disp = max_atomic_displacement_between_adjacent_structs(structs)
+
+    return {
+         "pol_orig_struct": pol_orig_struct,
+         "np_orig_struct": np_orig_struct,
+         "np_trans_struct": np_trans_struct,
+         "structs": structs,
+         "orig_max_disp": orig_max_disp,
+         "adj_max_disp": adj_max_disp,
+     }
+
+
 def get_refined_oshift(st_a,st_b,grid_range=0.1):
     max_disps = []
     ogrid = product(np.arange(-grid_range,grid_range,0.01),
@@ -19,73 +53,8 @@ def get_refined_oshift(st_a,st_b,grid_range=0.1):
                                                                                  st_b.frac_coords)))])
     return max_disps
 
-# from Francesco
-def get_refined_oshift_avg(st_a,st_b,grid_range=0.1):
-    max_disps = []
-    ogrid = product(np.arange(-grid_range,grid_range,0.01),
-                    np.arange(-grid_range,grid_range,0.01),
-                    np.arange(-grid_range,grid_range,0.01))
-    for oshift in ogrid:
-        st_a_copy = st_a.copy()
-        st_a_copy.translate_sites(range(len(st_a)),oshift)
-        max_disps.append([oshift,np.mean(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords,
-                                                                              st_b.frac_coords)))])
-    return max_disps
 
-
-def get_refined_oshift_max_x(st_a,st_b,grid_range=0.1):
-    max_disps = []
-    ogrid = product(np.arange(-grid_range,grid_range,0.01),
-                    np.array([0]),
-                    np.array([0]))
-    for oshift in ogrid:
-        st_a_copy = st_a.copy()
-        st_a_copy.translate_sites(range(len(st_a)),oshift)
-        max_disps.append([oshift,np.max(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords,
-                                                                              st_b.frac_coords)))])
-    return max_disps
-
-
-def get_refined_oshift_max_y(st_a,st_b,grid_range=0.1):
-    max_disps = []
-    ogrid = product(np.array([0]),
-                    np.arange(-grid_range,grid_range,0.01),
-                    np.array([0]))
-    for oshift in ogrid:
-        st_a_copy = st_a.copy()
-        st_a_copy.translate_sites(range(len(st_a)),oshift)
-        max_disps.append([oshift,np.max(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords,
-                                                                              st_b.frac_coords)))])
-    return max_disps
-
-
-def get_refined_oshift_max_z(st_a,st_b,grid_range=0.1):
-    max_disps = []
-    ogrid = product(np.array([0]),
-                    np.array([0]),
-                    np.arange(-grid_range,grid_range,0.01))
-    for oshift in ogrid:
-        st_a_copy = st_a.copy()
-        st_a_copy.translate_sites(range(len(st_a)),oshift)
-        max_disps.append([oshift,np.max(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords,
-                                                                              st_b.frac_coords)))])
-    return max_disps
-
-
-def get_refined_oshift_max_a(st_a, st_b, grid_range=0.1):
-    max_disps = []
-    ogrid = product(np.array(np.arange(-grid_range, grid_range, 0.01)),
-                             np.array([0]),
-                             np.array([0]))
-    for oshift in ogrid:
-        st_a_copy = st_a.copy()
-        st_a_copy.translate_sites(range(len(st_a)), oshift, frac_coords=True)
-        max_disps.append([oshift, np.max(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords, st_b.frac_coords)))])
-    return max_disps
-                                              
-
-
-def calc_max_disp(struct_a, struct_b, trans):
+def calc_max_disp(struct_a, struct_b, trans=None):
 
     if trans is None:
         trans = np.array([0.0, 0.0, 0.0])
@@ -97,154 +66,6 @@ def calc_max_disp(struct_a, struct_b, trans):
     return max_disp
 
 
-def calc_avg_disp(struct_a, struct_b, trans):
-    st_a_copy = struct_a.copy()
-    st_a_copy.translate_sites(range(len(struct_a)),trans)
-    avg_disp = np.mean(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords,
-                                                               struct_b.frac_coords)))
-    return avg_disp
-
-
-def make_five_translations(folder_path):
-    pol_POSCAR_file = folder_path+'POSCAR_pol_orig'
-    np_POSCAR_file = folder_path+'POSCAR_np_orig'
-    # load in a structures
-    pol_struct_orig = Structure.from_file(pol_POSCAR_file)
-    np_struct_orig = Structure.from_file(np_POSCAR_file)
-    # make copies so don't change original files
-    pol_struct = pol_struct_orig.copy()
-    np_struct = np_struct_orig.copy()
-    # get displacements
-    max_disps = get_refined_oshift(np_struct, pol_struct)
-    sorted_max_disps = sorted(max_disps,key=lambda x: x[1])
-    # pick 5 points along which to save translated POSCARS
-    # translate NP wrt POL
-    index_1 = 0
-    trans_1 = sorted_max_disps[index_1][0]
-    disp_1 = sorted_max_disps[index_1][1]
-
-    index_2 = int(len(sorted_max_disps)/4)
-    trans_2 = sorted_max_disps[index_2][0]
-    disp_2 = sorted_max_disps[index_2][1]
-    
-    index_3 = int(len(sorted_max_disps)/4)*2
-    trans_3 = sorted_max_disps[index_3][0]
-    disp_3 = sorted_max_disps[index_3][1]
-
-    index_4 = int(len(sorted_max_disps)/4)*3
-    trans_4 = sorted_max_disps[index_4][0]
-    disp_4 = sorted_max_disps[index_4][1]
-
-    index_5 = -1
-    trans_5 = sorted_max_disps[index_5][0]
-    disp_5 = sorted_max_disps[index_5][1]
-
-    print(f'min_disp: {sorted_max_disps[0][-1]}')
-
-    no_trans = (0., 0., 0.)
-    
-    all_trans = [trans_1, trans_2, trans_3, trans_4, trans_5, no_trans]
-    max_disp = [calc_max_disp(np_struct, pol_struct, trans) for trans in all_trans]
-
-    # save translated NP poscars in respective folders
-    base_save_path = folder_path
-    save_file_1 = base_save_path+'POSCAR_np_trans_1' # this is the "best" translation
-    save_file_2 = base_save_path+'POSCAR_np_trans_2'
-    save_file_3 = base_save_path+'POSCAR_np_trans_3'
-    save_file_4 = base_save_path+'POSCAR_np_trans_4'
-    save_file_5 = base_save_path+'POSCAR_np_trans_5' # this is the "worst" translation
-
-    np_trans_1 = np_struct_orig.copy()
-    np_trans_1.translate_sites(range(len(np_trans_1)), trans_1)
-    np_trans_1.to(filename=save_file_1, fmt='POSCAR')
-
-    np_trans_2 = np_struct_orig.copy()
-    np_trans_2.translate_sites(range(len(np_trans_2)), trans_2)
-    np_trans_2.to(filename=save_file_2, fmt='POSCAR')
-
-    np_trans_3 = np_struct_orig.copy()
-    np_trans_3.translate_sites(range(len(np_trans_3)), trans_3)
-    np_trans_3.to(filename=save_file_3, fmt='POSCAR')
-
-    np_trans_4 = np_struct_orig.copy()
-    np_trans_4.translate_sites(range(len(np_trans_4)), trans_4)
-    np_trans_4.to(filename=save_file_4, fmt='POSCAR')
-
-    np_trans_5 = np_struct_orig.copy()
-    np_trans_5.translate_sites(range(len(np_trans_5)), trans_5)
-    np_trans_5.to(filename=save_file_5, fmt='POSCAR')
-    
-    translated_structs = [np_trans_1,
-                          np_trans_2,
-                          np_trans_3,
-                          np_trans_4,
-                          np_trans_5,
-                          np_struct]
-    
-    return translated_structs, pol_struct, all_trans, max_disp
-
-
-def make_one_translation(folder_path):
-    pol_POSCAR_file = folder_path+'POSCAR_pol_orig'
-    np_POSCAR_file = folder_path+'POSCAR_np_orig'
-    # load in a structures
-    pol_struct_orig = Structure.from_file(pol_POSCAR_file)
-    np_struct_orig = Structure.from_file(np_POSCAR_file)
-    # make copies so don't change original files
-    pol_struct = pol_struct_orig.copy()
-    np_struct = np_struct_orig.copy()
-    # get displacements
-    max_disps = get_refined_oshift(np_struct, pol_struct)
-    sorted_max_disps = sorted(max_disps,key=lambda x: x[1])
-    # pick 5 points along which to save translated POSCARS
-    # translate NP wrt POL
-    index_1 = 0
-    trans_1 = sorted_max_disps[index_1][0]
-    disp_1 = sorted_max_disps[index_1][1]
-
-    print(f'min_disp: {sorted_max_disps[0][-1]}')
-
-
-    # save translated NP poscars in respective folders
-    base_save_path = folder_path
-    save_file_1 = base_save_path+'POSCAR_np_trans_1' # this is the "best" translation
-
-    np_trans_1 = np_struct_orig.copy()
-    np_trans_1.translate_sites(range(len(np_trans_1)), trans_1)
-    np_trans_1.to(filename=save_file_1, fmt='POSCAR')
-    
-    return np_trans_1, pol_struct, disp_1
-
-
-def translate_poscars(pol_POSCAR_file, np_POSCAR_file):
-
-    # load in a structures
-    pol_struct_orig = Structure.from_file(pol_POSCAR_file)
-    np_struct_orig = Structure.from_file(np_POSCAR_file)
-
-    # make copies so don't change original files
-    pol_struct = pol_struct_orig.copy()
-    np_struct = np_struct_orig.copy()
-    
-    # get displacements
-    max_disps = get_refined_oshift(np_struct, pol_struct)
-    sorted_max_disps = sorted(max_disps,key=lambda x: x[1])
-    
-    translation = sorted_max_disps[0][0]
-    max_displacement = sorted_max_disps[0][1]
-
-    # save translated NP poscars in respective folders
-    np_trans_1_POSCAR_file = 'POSCAR_np_trans_1' # this is the "best" translation
-
-    np_trans_1_struct = np_struct_orig.copy()
-    np_trans_1_struct.translate_sites(range(len(np_trans_1_struct)), translation)
-    np_trans_1_struct.to(filename=np_trans_1_POSCAR_file, fmt='POSCAR')
-    
-    return pol_struct, np_trans_1_struct, max_displacement, translation
-
-
-
-#### THIS FUNCTION BELOW -- save ##
 def translate_structs(pol_struct, np_struct, translation=None):
 
     if translation is None:
@@ -256,37 +77,6 @@ def translate_structs(pol_struct, np_struct, translation=None):
     np_trans_struct.translate_sites(range(len(np_trans_struct)), translation)
 
     return np_trans_struct
-
-def make_one_translation_files(folder_path, pol_POSCAR_file, np_POSCAR_file, out_file):
-    pol_POSCAR_file = folder_path+pol_POSCAR_file
-    np_POSCAR_file = folder_path+np_POSCAR_file
-    # load in a structures
-    pol_struct_orig = Structure.from_file(pol_POSCAR_file)
-    np_struct_orig = Structure.from_file(np_POSCAR_file)
-    # make copies so don't change original files
-    pol_struct = pol_struct_orig.copy()
-    np_struct = np_struct_orig.copy()
-    # get displacements
-    max_disps = get_refined_oshift(np_struct, pol_struct)
-    sorted_max_disps = sorted(max_disps,key=lambda x: x[1])
-    # pick 5 points along which to save translated POSCARS
-    # translate NP wrt POL
-    index_1 = 0
-    trans_1 = sorted_max_disps[index_1][0]
-    disp_1 = sorted_max_disps[index_1][1]
-
-    print(f'min_disp: {sorted_max_disps[0][-1]}')
-
-
-    # save translated NP poscars in respective folders
-    base_save_path = folder_path
-    save_file_1 = base_save_path+out_file # this is the "best" translation
-
-    np_trans_1 = np_struct_orig.copy()
-    np_trans_1.translate_sites(range(len(np_trans_1)), trans_1)
-    np_trans_1.to(filename=save_file_1, fmt='POSCAR')
-    
-    return np_trans_1, pol_struct, disp_1
 
 
 def max_atomic_displacement_between_adjacent_structs(structs):
@@ -305,46 +95,30 @@ def max_atomic_displacement_between_adjacent_structs(structs):
     return max_disp
 
 
+def write_qe_in_scf_files(file_path, structs, material, pseudo_dir,
+                          kpoints_grid, kshift, species_dict):
 
-def make_one_translation_structures(pol_struct, np_struct):
+    if len(structs) == 2:
+        tags = ["pol_orig", "np_trans"]
+    elif len(structs) > 2:
+        tags = []
+        for i in range(len(structs)):
+            if i == 0:
+                tags.append("pol_orig")
+            elif i == len(structs) - 1:
+                tags.append("np_trans")
+            else:
+                tags.append(f"interp_{i}")
     
-    max_disps = get_refined_oshift(np_struct, pol_struct)
-    sorted_max_disps = sorted(max_disps,key=lambda x: x[1])
-    trans = sorted_max_disps[0][0]
-    disp = sorted_max_disps[0][1]
-    np_trans_struct = np_struct.copy()
-    np_trans_struct.translate_sites(range(len(np_trans_struct)), trans)
-    print(f'min_disp: {sorted_max_disps[0][-1]}')
- 
-    return pol_struct, np_trans_struct
 
+    sym = False
+    for struct, tag in zip(structs, tags):
+        poscar_to_qe_io_scf_nomag(struct, material, tag, sym,
+                                  pseudo_dir, kpoints_grid, kshift, species_dict, file_path)
 
-# need this one
-def interp_files(base_path, num_interps):
-    pol_POSCAR_file = base_path+'POSCAR_pol_orig'
-    np_POSCAR_file = base_path+'POSCAR_np_trans_1'
-    pol_struct_orig = Structure.from_file(pol_POSCAR_file)
-    np_struct_orig = Structure.from_file(np_POSCAR_file)
-    interp_structs = pol_struct_orig.interpolate(np_struct_orig, num_interps, True)
-    for i in range(1, len(interp_structs)-1):
-        save_file = base_path+'POSCAR_interp_'+str(i)
-        interp_structs[i].to(filename=save_file, fmt='POSCAR')
-    return interp_structs
+    return 0
 
-
-def interp_orig_files(base_path, save_path, num_interps):
-    pol_POSCAR_file = base_path+'POSCAR_pol_orig'
-    np_POSCAR_file = base_path+'POSCAR_np_orig'
-    pol_struct_orig = Structure.from_file(pol_POSCAR_file)
-    np_struct_orig = Structure.from_file(np_POSCAR_file)
-    interp_structs = pol_struct_orig.interpolate(np_struct_orig, num_interps, True)
-    for i in range(1, len(interp_structs)-1):
-        save_file = save_path+'POSCAR_interp_'+str(i)
-        interp_structs[i].to(filename=save_file, fmt='POSCAR')
-    return interp_structs
-
-
-def poscar_to_qe_io_scf_nomag(file_path, poscar_file, material, tag, sym,
+def poscar_to_qe_io_scf_nomag(structure, material, tag, sym,
                           pseudo_dir, kpoints_grid, kshift, species_dict, out_path):
     '''
     file_path: file where poscar is located and where QE.in file will be written to
@@ -359,8 +133,6 @@ def poscar_to_qe_io_scf_nomag(file_path, poscar_file, material, tag, sym,
     out_path: where to write file out to 
     '''
     
-    poscar = Poscar.from_file(poscar_file)
-    structure = poscar.structure
     k1, k2, k3 = kpoints_grid
     name = material+'_'+tag
 
@@ -441,7 +213,7 @@ def poscar_to_qe_io_scf_nomag(file_path, poscar_file, material, tag, sym,
         for i in range(len(species_dict["species"])):
             species = species_dict["species"][i]
             mass = species_dict["masses"][i]
-            pseudo = species_dict["psuedos"][i]
+            pseudo = species_dict["pseudos"][i]
             f.write(f"  {species}  {mass:.4f} {pseudo}\n")
     
         f.write("ATOMIC_POSITIONS crystal\n")
@@ -552,72 +324,6 @@ def parse_qe_input(input_file):
     }
 
 
-
-
-
-# def write_input_dicts_to_qe_file(filename, control_dict, system_dict, electrons_dict, species_dict,
-#                                  pmg_structure, k_points_dict, cell_parameters_dict, hubbard_dict=None):
-    
-#         with open(filename, "w") as f:
-    
-#         f.write("&CONTROL\n")
-#         for key, value in control_dict.items():
-#             if isinstance(value, str):
-#                 f.write(f"  {key} = '{value}'\n")
-#             else:
-#                 f.write(f"  {key} = {value}\n") 
-#         f.write("  /\n")
-    
-#         f.write(" &SYSTEM\n")
-#         for key, value in system_dict.items():
-#             if isinstance(value, bool):
-#                 value_str = ".TRUE." if value else ".FALSE."
-#                 f.write(f"  {key} = {value_str}\n")
-#             elif isinstance(value, str):
-#                 f.write(f"  {key} = '{value}'\n")
-#             else:
-#                 f.write(f"  {key} = {value}\n")
-#         f.write("  /\n")
-    
-#         f.write("  &ELECTRONS\n")
-#         for key, value in electrons_dict.items():
-#             if key == "conv_thr":
-#                 # Special case for scientific notation in Quantum Espresso style
-#                 f.write(f"  {key} = {value:.1e}".replace('e', 'd') + "\n")
-#             elif isinstance(value, bool):
-#                 value_str = ".TRUE." if value else ".FALSE."
-#                 f.write(f"  {key} = {value_str}\n")
-#             elif isinstance(value, str):
-#                 f.write(f"  {key} = '{value}'\n")
-#             else:
-#                 f.write(f"  {key} = {value}\n")
-#         # Add custom adaptive_thr parameter
-#         f.write("  adaptive_thr = .TRUE.\n")
-#         f.write("  /\n")
-
-#         f.write("ATOMIC_SPECIES\n")
-#         for i in range(len(species_dict["species"])):
-#             species = species_dict["species"][i]
-#             mass = species_dict["masses"][i]
-#             pseudo = species_dict["psuedos"][i]
-#             f.write(f"  {species}  {mass:.4f} {pseudo}\n")
-    
-#         f.write("ATOMIC_POSITIONS crystal\n")
-#         for site in structure.sites:
-#             species = site.specie.symbol
-#             frac_coords = site.frac_coords
-#             f.write(f"{species} {frac_coords[0]:.6f} {frac_coords[1]:.6f} {frac_coords[2]:.6f}\n")
-
-#         f.write("K_POINTS automatic\n")
-#         f.write(f"  {kpoints_grid[0]} {kpoints_grid[1]} {kpoints_grid[2]} {kshift[0]} {kshift[1]} {kshift[2]}\n")
-    
-#         f.write("CELL_PARAMETERS angstrom\n")
-#         for vec in structure.lattice.matrix:
-#             f.write(f"  {vec[0]:.6f} {vec[1]:.6f} {vec[2]:.6f}\n")
-            
-#         return 0
-
-
 def write_qe_input(control_dict, system_dict, electron_dict, species_dict, kpoint_dict, hubbard_dict, structure, filename, hubbard_true=True):
     
     def map_species_name(species_string):
@@ -694,7 +400,7 @@ def generate_qe_in_from_qe_in(orig_pol_qe_in_filename, orig_np_qe_in_filename,
     pol_struct = pol_input_dict["structure"]
     np_struct = np_input_dict["structure"]
     
-    _, np_struct_trans = make_one_translation_structures(pol_struct, np_struct)
+    np_struct_trans = translate_structs(pol_struct, np_struct)
     
     pol_input_dict["system"]["nosym"] = True
     pol_input_dict["system"]["noinv"] = True
@@ -718,126 +424,4 @@ def generate_qe_in_from_qe_in(orig_pol_qe_in_filename, orig_np_qe_in_filename,
                np_input_dict['hubbard'],
                np_struct_trans,
                bfd_np_qe_in_filename)
-    return 0
-    
-    
-    
-    
-### NOT NEEDED FOR PUBLIC RELEASE    
-def poscar_to_qe_io_nscf_nomag(file_path, poscar_file, material, tag, gdir, nppstr,
-                          pseudo_dir, kpoints_grid, kshift, species_dict, out_path):
-    '''
-    file_path: file where poscar is located and where QE.in file will be written to
-    poscar_file: name of poscar file
-    material: name of material in string form, ex "BaTiO3"
-    tag: for naming prefix and QE input file ex "np_orig" or "trans_1" or "interp_1"
-    sym: boolean (true or false)
-    pseudo_dir: location of psuedopotential files
-    kpoints_grid: ex (5, 5, 5)
-    kshift: either (0, 0, 0) or (1, 1, 1)
-    species_dict: contains atoms and materials
-    out_path: where to write file out to 
-    '''
-    
-    poscar = Poscar.from_file(poscar_file)
-    structure = poscar.structure
-    k1, k2, k3 = kpoints_grid
-    name = material+'_'+tag
-
-    control_dict = {
-    "calculation": "nscf",
-    "prefix": name,
-    "pseudo_dir": pseudo_dir,
-    "outdir": 'calculations_'+str(k1)+str(k2)+str(k3)+'/',
-    "verbosity": "high",
-    "lberry": "True",
-    "gdir": gdir,
-    "nppstr": nppstr
-    }
-
-    system_dict = {
-    "ibrav": 0,
-    "ecutwfc": 100,
-    "input_dft": "pbe",
-    "nat": structure.num_sites,
-    "ntyp": len(structure.composition.elements),
-    }
-    
-    electrons_dict = {
-    "conv_thr": 1e-8,
-    "mixing_beta": 0.7,
-    "mixing_mode": 'plain',
-    "mixing_ndim": 8,
-    "diagonalization": 'david'
-    }
-    
-
-    filename = out_path+name+'_k'+str(k1)+str(k2)+str(k3)+'_nscf_gdir'+str(gdir)+'.in'
-
-    with open(filename, "w") as f:
-    
-        f.write("&CONTROL\n")
-        for key, value in control_dict.items():
-            if key in ["lberry"]:
-                value_str = ".TRUE." if value else ".FALSE."
-                f.write(f"  {key} = {value_str}\n")
-            elif isinstance(value, str):
-                f.write(f"  {key} = '{value}'\n")
-            else:
-                f.write(f"  {key} = {value}\n")
-        f.write("  /\n")
-    
-        f.write(" &SYSTEM\n")
-        for key, value in system_dict.items():
-            if isinstance(value, bool):
-                value_str = ".TRUE." if value else ".FALSE."
-                f.write(f"  {key} = {value_str}\n")
-            elif isinstance(value, str):
-                f.write(f"  {key} = '{value}'\n")
-            else:
-                f.write(f"  {key} = {value}\n")
-        f.write("  /\n")
-    
-        f.write("  &ELECTRONS\n")
-        for key, value in electrons_dict.items():
-            if key == "conv_thr":
-                # Special case for scientific notation in Quantum Espresso style
-                f.write(f"  {key} = {value:.1e}".replace('e', 'd') + "\n")
-            elif isinstance(value, bool):
-                value_str = ".TRUE." if value else ".FALSE."
-                f.write(f"  {key} = {value_str}\n")
-            elif isinstance(value, str):
-                f.write(f"  {key} = '{value}'\n")
-            else:
-                f.write(f"  {key} = {value}\n")
-        # Add custom adaptive_thr parameter
-        f.write("  adaptive_thr = .TRUE.\n")
-        f.write("  /\n")
-
-        f.write("ATOMIC_SPECIES\n")
-        for i in range(len(species_dict["species"])):
-            species = species_dict["species"][i]
-            mass = species_dict["masses"][i]
-            pseudo = species_dict["psuedos"][i]
-            f.write(f"  {species}  {mass:.4f} {pseudo}\n")
-    
-        f.write("ATOMIC_POSITIONS crystal\n")
-        for site in structure.sites:
-            species = site.specie.symbol
-            frac_coords = site.frac_coords
-            f.write(f"{species} {frac_coords[0]:.6f} {frac_coords[1]:.6f} {frac_coords[2]:.6f}\n")
-
-        f.write("K_POINTS automatic\n")
-        if gdir == 1:
-            f.write(f"  {3*kpoints_grid[0]} {2*kpoints_grid[1]} {2*kpoints_grid[2]} {kshift[0]} {kshift[1]} {kshift[2]}\n")
-        elif gdir == 2:
-            f.write(f"  {2*kpoints_grid[0]} {3*kpoints_grid[1]} {2*kpoints_grid[2]} {kshift[0]} {kshift[1]} {kshift[2]}\n")
-        elif gdir == 3:
-            f.write(f"  {2*kpoints_grid[0]} {2*kpoints_grid[1]} {3*kpoints_grid[2]} {kshift[0]} {kshift[1]} {kshift[2]}\n")
-            
-    
-        f.write("CELL_PARAMETERS angstrom\n")
-        for vec in structure.lattice.matrix:
-            f.write(f"  {vec[0]:.6f} {vec[1]:.6f} {vec[2]:.6f}\n")
-        
     return 0
