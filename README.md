@@ -29,7 +29,9 @@ Unlike the standard approach—where formal polarization is computed separately 
 
 - Both reference structures must have **the same number of atoms in the same order** in the input files.  
 - The DFT calculations for the two structures must use **the same k-point mesh discretization**.
-
+- Need to save wavefunctions over the entire BZ
+    - VASP: `INCAR` must have `LWAVE = True` and `ISYM = -1`
+    - Quantum ESPRESSO: .in file must have `nosym = True` in `&SYSTEM` and `wf_collect = True` in `&CONTROL`
 ---
 
 ## 🔧 Installation
@@ -53,24 +55,18 @@ cd berry-flux-diag
 BerryFluxDiag offers four optional installation modes:
 
 1. Quantum ESPRESSO — [QE]
-    Includes support for:
-    * pre-processing 2 qe.in files (one for each reference structure)
-    * parsing the output .xml files with `qeschema`
-    * parsing the output wavefunctions in .hdf5 format with `h5py` 
     ```bash
     pip install .[QE]
     ```
-
 2. VASP — [VASP]
-3. VASP with atomate2 jobflows — [VASP-atomate2]
+    ```bash
+    pip install .[VASP]
+    ```
+3. VASP with atomate2 jobflows — [VASP\_atomate2]
+    ```bash
+    pip install .[VASP_atomate]
+    ```
 4. All supported workflows — [all]
-
-## 1. Quantum ESPRESSO [QE]
-
-
-
-1. polar .xml file
-2. non-polar .xml file
-3. path to folder with polar wavefunctions in .hdf5 format
-4. path to folder with non-polar wavefunctions in .hdf5 format
-5. non-polar .out file
+   ```bash
+    pip install .
+    ```
