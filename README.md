@@ -59,14 +59,27 @@ cd berry-flux-diag
 BerryFluxDiag offers four optional installation modes:
 
 1. Quantum ESPRESSO — [QE]
+    
+    depedencies:
+        - `qeschema`
+        - `h5py`
     ```bash
     pip install .[QE]
     ```
 2. VASP — [VASP]
+    
+    dependencies:
+        - `pawpyseed` (note: this requires the Intel Math Kernel Library (MKL), which is widely available on most computing clusters but is not necessarily available on Macs)
     ```bash
     pip install .[VASP]
     ```
 3. VASP with atomate2 jobflows — [VASP\_atomate2]
+    
+    dependencies:
+        - `pawpyseed` (see above note)
+        - `atomate2`
+        - `jobflow`
+        - `monty`
     ```bash
     pip install .[VASP_atomate2]
     ```
