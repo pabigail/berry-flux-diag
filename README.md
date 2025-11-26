@@ -16,13 +16,12 @@ To compute differences in formal polarization:
 1. **Pre-process your input DFT files**  
    - **VASP**: `INCAR`, `POSCAR`, `KPOINTS`  
    - **Quantum ESPRESSO**: `qe.in`  
-
-    (See tutorials/preprocess\_DFT.ipynb)
+   - See tutorials/preprocess\_DFT.ipynb
 
 2. **Run the DFT calculation**
 
 3. **Post-process the DFT output** to compute differences in formal polarization
-    (See tutorials/postprocess\_DFT.ipynb)
+   -  (See tutorials/postprocess\_DFT.ipynb)
 
 Unlike the standard approach—where formal polarization is computed separately for two reference structures and then subtracted along the same branch—**Berry Flux diagonalization computes a gauge-invariant difference directly from the wavefunctions of both structures together**.
 
@@ -35,6 +34,8 @@ Unlike the standard approach—where formal polarization is computed separately 
 - Need to save wavefunctions over the entire BZ
     - VASP: `INCAR` must have `LWAVE = True` and `ISYM = -1`
     - Quantum ESPRESSO: .in file must have `nosym = True` in `&SYSTEM` and `wf_collect = True` in `&CONTROL`
+- Apply translation that minimizes maximum atomic displacement between two reference structures; if the translation that minimizes this distance is still > 0.3 Angstroms, add as many interpolations as necessary so that the max atomic displacement between any two adjacent structures is <= 0.3 Angstroms. See the preprocessing tutorial for automated code to do so, and [Poteshman et al., arXiv:2511.18586](https://arxiv.org/abs/2511.18586) for more details. 
+
 ---
 
 ## 🔧 Installation
