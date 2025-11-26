@@ -1,0 +1,42 @@
+# -----------------------------
+# Python cache / temp files
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Byte-compiled / optimized / DLL files
+*.so
+
+# -----------------------------
+# Build artifacts
+# -----------------------------
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# -----------------------------
+# Jupyter Notebook junk
+# -----------------------------
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# -----------------------------
+# Virtual environments
+# -----------------------------
+venv/
+.env/
+.venv/
+
+# -----------------------------
+# OS / editor noise
+# -----------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+

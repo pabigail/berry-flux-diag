@@ -26,7 +26,7 @@ VASP = [
 ]
 
 # --- Atomate2 VASP workflow extras ---
-VASP-atomate2 = [
+VASP_atomate2 = [
     "pawpyseed",
     "jobflow",
     "atomate2",
