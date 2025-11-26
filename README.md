@@ -32,16 +32,6 @@ Unlike the standard approach—where formal polarization is computed separately 
 
 ---
 
-## Pre-processing Tools
-
-We provide:
-
-- **Automatic tools** to pre-process your DFT input files  
-- Instructions for **manual pre-processing** if you prefer to prepare input files yourself
-
-
----
-
 ## 🔧 Installation
 
 The recommended workflow is:
@@ -63,6 +53,14 @@ cd berry-flux-diag
 BerryFluxDiag offers four optional installation modes:
 
 1. Quantum ESPRESSO — [QE]
+    Includes support for:
+    * pre-processing 2 qe.in files (one for each reference structure)
+    * parsing the output .xml files with `qeschema`
+    * parsing the output wavefunctions in .hdf5 format with `h5py` 
+    ```bash
+    pip install .[QE]
+    ```
+
 2. VASP — [VASP]
 3. VASP with atomate2 jobflows — [VASP-atomate2]
 4. All supported workflows — [all]
