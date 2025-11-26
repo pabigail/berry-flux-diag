@@ -42,7 +42,6 @@ class Overlaps:
                                      parse_dict['np_band_fill']])
     
     # calculate overlaps
-    # NEED TO CHECK BEFORE WHETHER TO COMPUTE OVERLAP
     def compute_overlap(self, l0, kpt0, l1, kpt1, direction, space = 'g'):
         '''
         returns overlap matrix between states (l0, kpt0) and (l1, kpt1)

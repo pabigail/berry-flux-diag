@@ -1,0 +1,44 @@
+[project]
+name = "berry_flux_diag"
+version = "0.1.0"
+description = "Berry flux diagonalization"
+authors = [{ name = "Abigail N. Poteshman" }]
+requires-python = ">=3.9"
+readme = "README.md"
+
+# Base dependencies (common to everything)
+dependencies = [
+    "numpy>=1.22",
+    "pymatgen>=2024.0",
+]
+
+[project.optional-dependencies]
+
+# --- Quantum ESPRESSO extras ---
+QE = [
+    "qeschema",
+    "h5py",
+]
+
+# --- VASP extras ---
+VASP = [
+    "pawpyseed",      
+]
+
+# --- Atomate2 VASP workflow extras ---
+VASP-atomate2 = [
+    "pawpyseed",
+    "jobflow",
+    "atomate2",
+    "monty",
+]
+
+# --- Install everything (QE + VASP + VASP-atomate2) ---
+all = [
+    "qeschema",
+    "h5py",
+    "pawpyseed",
+    "jobflow",
+    "atomate2",
+    "monty",
+]
