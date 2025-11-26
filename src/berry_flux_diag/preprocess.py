@@ -5,7 +5,7 @@ import numpy as np
 from pymatgen.core import Structure, Lattice
 from pymatgen.io.vasp import Poscar
 import re
-
+import os
 
 def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
                        num_interps = 'auto', MAX_DISP=0.3):
@@ -425,3 +425,36 @@ def generate_qe_in_from_qe_in(orig_pol_qe_in_filename, orig_np_qe_in_filename,
                np_struct_trans,
                bfd_np_qe_in_filename)
     return 0
+
+
+def write_vasp_in_poscar_files(save_path, structs, material):
+    """
+    Write a list of pymatgen Structures to POSCAR files with a specific naming convention.
+
+    Parameters
+    ----------
+    save_path : str
+        Path to directory where POSCAR files will be saved.
+    structs : list of pymatgen.Structure
+        List of Structure objects to write.
+    material : str
+        Material name to include in the POSCAR filename.
+    """
+    os.makedirs(save_path, exist_ok=True)
+
+    n_structs = len(structs)
+    if n_structs < 2:
+        raise ValueError("Structs list must contain at least two structures.")
+
+    for i, struct in enumerate(structs):
+        if i == 0:
+            tag = "pol_orig"
+        elif i == n_structs - 1:
+            tag = "np_trans"
+        else:
+            tag = f"interp_{i-1}"
+
+        filename = os.path.join(save_path, f"POSCAR_{material}_{tag}")
+        poscar = Poscar(struct)
+        poscar.write_file(filename)
+        print(f"Wrote {filename}")

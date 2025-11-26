@@ -400,3 +400,5 @@ def bfd_schema(preprocess_output,
 
     dumpfn(save_dict, os.path.join(save_dir, f"bfd_schema_{save_name}.json"))
     return save_dict
+
+
