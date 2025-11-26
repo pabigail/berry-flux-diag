@@ -1,4 +1,4 @@
-# BerryFluxDiag
+# berry-flux-diag
 
 **berry-flux-diag** is a DFT pre- and post-processing package to compute **differences in formal polarization** using the **Berry Flux diagonalization** approach. For details on the methodology, see:
 
