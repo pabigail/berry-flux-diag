@@ -6,7 +6,7 @@ from pawpyseed.core.wavefunction import Wavefunction, CoreRegion
 from pawpyseed.core.momentum import MomentumMatrix
 from pawpyseed.core import pawpyc
 import numpy as np
-import BerryFluxDiag.utils as utils
+import berry_flux_diag.utils as utils
 from pathlib import Path
 
 def get_band_filling_from_wavecar_nospin(wavecar, tol):

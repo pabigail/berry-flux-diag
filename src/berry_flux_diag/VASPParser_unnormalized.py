@@ -2,7 +2,7 @@ from pymatgen.core.structure import Structure
 from pymatgen.io.vasp.outputs import Wavecar, Kpoints, Potcar
 from pymatgen.analysis.ferroelectricity.polarization import zval_dict_from_potcar
 import numpy as np
-import BerryFluxDiag.utils as utils
+import berry_flux_diag.utils as utils
 
 
 def get_band_filling_from_wavecar_nospin(wavecar, tol):

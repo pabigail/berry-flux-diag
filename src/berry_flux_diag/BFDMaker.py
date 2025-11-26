@@ -1,6 +1,6 @@
 from pathlib import Path
 from jobflow import Maker, Flow, job
-from bfd_jobs import (
+from BFDJobs import (
     preprocess_POSCARS,
     scf_with_fixed_kpoints,
     make_string_sum_jobs,

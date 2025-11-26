@@ -243,6 +243,8 @@ def translate_poscars(pol_POSCAR_file, np_POSCAR_file):
     return pol_struct, np_trans_1_struct, max_displacement, translation
 
 
+
+#### THIS FUNCTION BELOW -- save ##
 def translate_structs(pol_struct, np_struct, translation=None):
 
     if translation is None:

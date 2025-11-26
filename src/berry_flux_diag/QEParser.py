@@ -3,7 +3,7 @@ from pymatgen.io.pwscf import PWOutput
 import qeschema
 import h5py
 import numpy as np
-import BerryFluxDiag.utils as utils
+import berry_flux_diag.utils as utils
 
 def get_struct_from_qeschema(xml_data):
     

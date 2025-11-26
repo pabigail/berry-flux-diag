@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import numpy as np
-import BerryFluxDiag.utils as utils
+import berry_flux_diag.utils as utils
 from pymatgen.core.structure import Structure
 from pymatgen.util.coord_cython import pbc_shortest_vectors
 
