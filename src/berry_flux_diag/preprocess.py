@@ -25,7 +25,7 @@ def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
         raise TypeError("num_interps must be a non-negative integer or the string 'auto'")
 
     if orig_max_disp > MAX_DISP:
-        structs = pol_orig_struct.interpolate(np_trans_struct, num_interps, interpolate_lattice=True)
+        structs = pol_orig_struct.interpolate(np_trans_struct, num_interps, interpolate_lattices=True)
     else:
         structs = [pol_orig_struct, np_trans_struct]
 
