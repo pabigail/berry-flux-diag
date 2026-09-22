@@ -153,22 +153,62 @@ def get_wfcn_gvecs_from_hdf5_spinpol(wfc_folder_path, kpoint_list, max_band_fill
 
 
 def get_zval_dict_from_PWOutput(pw_out):
-    
+    """Valence charge per element, read from the pseudopotential banner.
+
+    Quantum ESPRESSO prints one block per species, for example::
+
+        PseudoPot. # 1 for Ba read from file:
+        /path/to/Ba_ONCV_PBE-1.0.upf
+        MD5 check sum: e597b880c13c16463245d39d15e4590c
+        Pseudo is Norm-conserving, Zval = 10.0
+
+    Each Zval is matched to its element by position - it is the Zval line
+    lying between this element's line and the next element's - rather than
+    by a fixed offset from the element line. The block is not a fixed
+    height: the MD5 line is absent in older QE versions, which shifts Zval
+    up by one.
+    """
     zval_pattern = {'element': 'for\\s+(\\w+)\\s+read\\sfrom\\sfile',
                 'zval': 'Zval\\s+=\\s+([\\d+\\.]+)\\s'}
-    
+
     pw_out.read_pattern(zval_pattern)
     pw_out_data = pw_out.data
-    
+
+    elements = pw_out_data.get('element') or []
+    zvals = pw_out_data.get('zval') or []
+
+    if not elements:
+        raise ValueError(
+            f"no pseudopotential blocks found in {pw_out.filename}; it may be "
+            f"truncated, or from a run that did not reach the banner"
+        )
+
+    if len(elements) != len(zvals):
+        raise ValueError(
+            f"{pw_out.filename} has {len(elements)} pseudopotential blocks but "
+            f"{len(zvals)} Zval lines; every species must report a valence charge"
+        )
+
     zval_dict = {}
-    for entry in pw_out_data['element']:
-        element = entry[0][0]
-        line_num = entry[1]
-        for zvals in pw_out_data['zval']:
-            if zvals[1] == line_num+3:
-                zval = float(zvals[0][0])
+    for index, (element_entry, zval_entry) in enumerate(zip(elements, zvals)):
+        element, element_line = element_entry[0][0], element_entry[1]
+        zval, zval_line = float(zval_entry[0][0]), zval_entry[1]
+
+        # The pairing is only trustworthy if this Zval falls inside this
+        # element's block, so check it rather than assume the order holds.
+        next_element_line = (elements[index + 1][1]
+                             if index + 1 < len(elements) else float('inf'))
+
+        if not element_line < zval_line < next_element_line:
+            raise ValueError(
+                f"in {pw_out.filename}, the Zval on line {zval_line + 1} does not "
+                f"fall inside the block for {element} starting on line "
+                f"{element_line + 1}; the pseudopotential output could not be "
+                f"read reliably"
+            )
+
         zval_dict[element] = zval
-        
+
     return zval_dict
 
 
