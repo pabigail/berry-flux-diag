@@ -41,6 +41,11 @@ def vasp_reference() -> dict:
 
 
 @pytest.fixture(scope="session")
+def vasp_unnormalized_reference() -> dict:
+    return load_reference("batio3_vasp_unnormalized_nospin.json")
+
+
+@pytest.fixture(scope="session")
 def vasp_run_dirs() -> tuple[Path, Path]:
     """Polar and nonpolar VASP run directories, or skip."""
     pol, npol = os.environ.get(VASP_POL_ENV), os.environ.get(VASP_NP_ENV)
