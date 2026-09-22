@@ -8,10 +8,14 @@ without a DFT run.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pytest
 
 from berry_flux_diag.Overlaps import EIG_THRESH, SING_VAL_THRESH, Overlaps
+
+LOGGER = "berry_flux_diag.Overlaps"
 
 
 def make_overlaps(**kwargs):
@@ -35,6 +39,14 @@ def make_overlaps(**kwargs):
     return Overlaps(parse_dict, **kwargs)
 
 
+def warnings_from(caplog, call):
+    """Run call() and return what it logged at WARNING or above."""
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=LOGGER):
+        call()
+    return caplog.text
+
+
 def test_defaults_are_the_documented_values():
     """The historical values, unchanged: 2.8 rad and 0.2."""
     overlaps = make_overlaps()
@@ -53,23 +65,26 @@ def test_thresholds_are_overridable():
     assert overlaps.sing_val_thresh == 0.5
 
 
-def test_singular_value_below_threshold_warns(capsys):
+def test_singular_value_below_threshold_warns(caplog):
     overlaps = make_overlaps()
-    overlaps.check_overlap_conditioning([1.0, 0.9, 0.05])
-    assert "min singular value" in capsys.readouterr().out
+    text = warnings_from(
+        caplog, lambda: overlaps.check_overlap_conditioning([1.0, 0.9, 0.05]))
+    assert "min singular value" in text
 
 
-def test_singular_value_above_threshold_is_quiet(capsys):
+def test_singular_value_above_threshold_is_quiet(caplog):
     overlaps = make_overlaps()
-    overlaps.check_overlap_conditioning([1.0, 0.9, 0.5])
-    assert capsys.readouterr().out == ""
+    text = warnings_from(
+        caplog, lambda: overlaps.check_overlap_conditioning([1.0, 0.9, 0.5]))
+    assert text == ""
 
 
-def test_singular_value_threshold_is_honoured(capsys):
+def test_singular_value_threshold_is_honoured(caplog):
     """A run that tolerates poorer conditioning must stay quiet at 0.05."""
     overlaps = make_overlaps(sing_val_thresh=0.01)
-    overlaps.check_overlap_conditioning([1.0, 0.05])
-    assert capsys.readouterr().out == ""
+    text = warnings_from(
+        caplog, lambda: overlaps.check_overlap_conditioning([1.0, 0.05]))
+    assert text == ""
 
 
 def test_singular_value_check_returns_the_smallest():
@@ -78,31 +93,35 @@ def test_singular_value_check_returns_the_smallest():
     assert overlaps.check_overlap_conditioning([1.0, 0.3, 0.7]) == 0.3
 
 
-def test_wilson_phase_near_the_branch_cut_warns(capsys):
+def test_wilson_phase_near_the_branch_cut_warns(caplog):
     """2.9 rad is past 2.8 and close to the cut at pi."""
     overlaps = make_overlaps()
-    overlaps.check_wilson_loop_phases(np.array([0.1, 2.9]))
-    assert "underconverged" in capsys.readouterr().out
+    text = warnings_from(
+        caplog, lambda: overlaps.check_wilson_loop_phases(np.array([0.1, 2.9])))
+    assert "underconverged" in text
 
 
-def test_wilson_phase_warns_for_negative_phases(capsys):
+def test_wilson_phase_warns_for_negative_phases(caplog):
     """The cut is at both +pi and -pi, so the check is on the magnitude."""
     overlaps = make_overlaps()
-    overlaps.check_wilson_loop_phases(np.array([-2.9]))
-    assert "underconverged" in capsys.readouterr().out
+    text = warnings_from(
+        caplog, lambda: overlaps.check_wilson_loop_phases(np.array([-2.9])))
+    assert "underconverged" in text
 
 
-def test_wilson_phase_well_inside_the_range_is_quiet(capsys):
+def test_wilson_phase_well_inside_the_range_is_quiet(caplog):
     overlaps = make_overlaps()
-    overlaps.check_wilson_loop_phases(np.array([0.1, -0.4, 1.2]))
-    assert capsys.readouterr().out == ""
+    text = warnings_from(
+        caplog, lambda: overlaps.check_wilson_loop_phases(np.array([0.1, -0.4, 1.2])))
+    assert text == ""
 
 
-def test_wilson_phase_threshold_is_honoured(capsys):
+def test_wilson_phase_threshold_is_honoured(caplog):
     """A stricter run must warn at a phase the default tolerates."""
     overlaps = make_overlaps(eig_thresh=1.0)
-    overlaps.check_wilson_loop_phases(np.array([1.2]))
-    assert "underconverged" in capsys.readouterr().out
+    text = warnings_from(
+        caplog, lambda: overlaps.check_wilson_loop_phases(np.array([1.2])))
+    assert "underconverged" in text
 
 
 def test_wilson_phase_check_returns_the_largest_magnitude():

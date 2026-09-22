@@ -228,7 +228,7 @@ def scf_with_fixed_kpoints(
         if i == 0:
             fw.append_name("_scf_pol")
         elif i == len(structures)-1:
-            fw.append_name("scf_np")
+            fw.append_name("_scf_np")
         else:
             fw.append_name(f"_scf_{i}")
         jobs.append(fw)
@@ -268,7 +268,7 @@ def get_string_sums_from_VASP(pol_dir: str, np_dir: str) -> Response:
     np_POSCAR_file = ensure_unzipped(np_dir/"POSCAR")
     pol_wavecar = ensure_unzipped(pol_dir/"WAVECAR")
     np_wavecar = ensure_unzipped(np_dir/"WAVECAR")
-    potcar_file = ensure_unzipped(np_dir/"POTCAR")
+    # Both runs use the same POTCAR; the polar one is the one passed on.
     potcar_file = ensure_unzipped(pol_dir/"POTCAR")
     pol_OUTCAR = ensure_unzipped(pol_dir/"OUTCAR")
     np_OUTCAR = ensure_unzipped(np_dir/"OUTCAR")

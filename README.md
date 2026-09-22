@@ -38,6 +38,25 @@ Unlike the standard approach—where formal polarization is computed separately 
 
 ---
 
+## Logging
+
+The package logs rather than prints, so importing it stays quiet and it
+will not interfere with the logging of a program that uses it. Warnings —
+an underconverged k-mesh, a band filling that differs between the two runs
+— appear by default. Progress and results do not, until you ask:
+
+```python
+import berry_flux_diag as bfd
+
+bfd.configure_logging()          # INFO: string sums, contributions, result
+bfd.configure_logging("DEBUG")   # adds per-direction progress
+```
+
+This touches only the `berry_flux_diag` logger, never the root logger, and
+calling it twice replaces the handler rather than duplicating messages.
+
+---
+
 ## 🔧 Installation
 
 The recommended workflow is:

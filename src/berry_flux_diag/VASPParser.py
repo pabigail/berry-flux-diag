@@ -1,3 +1,5 @@
+import logging
+
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp import Vasprun
 from pymatgen.io.vasp.outputs import Wavecar, Kpoints, Potcar, Outcar # clean later
@@ -8,6 +10,8 @@ from pawpyseed.core import pawpyc
 import numpy as np
 import berry_flux_diag.utils as utils
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 def get_band_filling_from_wavecar_nospin(wavecar, tol):
 
@@ -42,11 +46,11 @@ def get_wfcn_dict_from_vasp(wavecar, kpoint_list, spin_pol):
         spin_down = 1
         max_band_fill_up = get_band_filling_from_wavecar_spinpol(wavecar, TOL, spin_up)
         max_band_fill_down = get_band_filling_from_wavecar_spinpol(wavecar, TOL, spin_down)
-        print(f'max_band_fill_up: {max_band_fill_up}')
-        print(f'max_band_fill_down: {max_band_fill_down}')
+        logger.info('max_band_fill_up: %s', max_band_fill_up)
+        logger.info('max_band_fill_down: %s', max_band_fill_down)
     else:
         max_band_fill = get_band_filling_from_wavecar_nospin(wavecar, TOL)
-        print(f'max_band_fill: {max_band_fill}')
+        logger.info('max_band_fill: %s', max_band_fill)
 
     num_kpts = len(kpoint_list)
     for index in range(0, num_kpts):

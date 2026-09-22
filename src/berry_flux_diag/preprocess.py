@@ -1,11 +1,14 @@
 #!/bin/bash/python
 
+import logging
 from itertools import product
 import numpy as np
 from pymatgen.core import Structure, Lattice
 from pymatgen.io.vasp import Poscar
 import re
 import os
+
+logger = logging.getLogger(__name__)
 
 def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
                        num_interps = 'auto', MAX_DISP=0.3):
@@ -452,9 +455,12 @@ def write_vasp_in_poscar_files(save_path, structs, material):
         elif i == n_structs - 1:
             tag = "np_trans"
         else:
-            tag = f"interp_{i-1}"
+            # Numbered by structure index, matching write_qe_in_scf_files and
+            # the _scf_{i} job names, so the same image has the same label
+            # whichever code it is run through.
+            tag = f"interp_{i}"
 
         filename = os.path.join(save_path, f"POSCAR_{material}_{tag}")
         poscar = Poscar(struct)
         poscar.write_file(filename)
-        print(f"Wrote {filename}")
+        logger.info("Wrote %s", filename)

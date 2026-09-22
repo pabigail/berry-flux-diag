@@ -1,3 +1,5 @@
+import logging
+
 from pymatgen.core.structure import Structure
 from pymatgen.io.pwscf import PWOutput
 import qeschema
@@ -5,6 +7,8 @@ import h5py
 import numpy as np
 import berry_flux_diag.utils as utils
 from berry_flux_diag.constants import BOHR_TO_ANGSTROM
+
+logger = logging.getLogger(__name__)
 
 def get_struct_from_qeschema(xml_data):
 
@@ -258,7 +262,9 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
         np_max_band_fill_up, np_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(np_xml_data, FILLING_TOL)
         if (pol_max_band_fill_up != np_max_band_fill_up or
             pol_max_band_fill_dw != np_max_band_fill_dw):
-            print("CAUTION: max band filling for polar and non-polar structures are not the same")
+            logger.warning("max band filling differs between the polar (up %s, down %s) and non-polar (up %s, down %s) runs; using the smaller of each",
+                           pol_max_band_fill_up, pol_max_band_fill_dw,
+                           np_max_band_fill_up, np_max_band_fill_dw)
         common_max_band_fill_up = np.min([pol_max_band_fill_up,
                                           np_max_band_fill_up])
         common_max_band_fill_dw = np.min([pol_max_band_fill_dw,
@@ -269,7 +275,8 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
         pol_max_band_fill = get_band_filling_from_qeschema_nospin(pol_xml_data,
                                                                   FILLING_TOL)
         if pol_max_band_fill != np_max_band_fill:
-            print("CAUTION: max band filling for polar and non-polar structures are not the same")
+            logger.warning("max band filling differs between the polar (%s) and non-polar (%s) runs; using the smaller",
+                           pol_max_band_fill, np_max_band_fill)
         common_max_band_fill = np.min([pol_max_band_fill, np_max_band_fill])
 
     if spin_pol:

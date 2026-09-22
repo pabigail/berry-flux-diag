@@ -1,10 +1,14 @@
 #!/usr/bin/env python
 
+import logging
+
 import numpy as np
 import berry_flux_diag.utils as utils
 from berry_flux_diag.constants import E_PER_ANG2_TO_MUC_PER_CM2
 from pymatgen.core.structure import Structure
 from pymatgen.util.coord_cython import pbc_shortest_vectors
+
+logger = logging.getLogger(__name__)
 
 
 # Diagnostic thresholds. Neither is a physical constant: both flag a k-mesh
@@ -65,7 +69,7 @@ class Overlaps:
                                      parse_dict['np_band_fill']])
     
     # calculate overlaps
-    def compute_overlap(self, l0, kpt0, l1, kpt1, direction, space = 'g'):
+    def compute_overlap(self, l0, kpt0, l1, kpt1, direction):
         '''
         returns overlap matrix between states (l0, kpt0) and (l1, kpt1)
         '''
@@ -147,9 +151,10 @@ class Overlaps:
         """
         smallest_sing_val = min(s)
         if smallest_sing_val < self.sing_val_thresh:
-            print(f'min singular value {smallest_sing_val} is below '
-                  f'{self.sing_val_thresh}; occupied bands barely overlap '
-                  f'between adjacent k-points, so this plaquette is unreliable')
+            logger.warning('min singular value %s is below %s; occupied bands '
+                           'barely overlap between adjacent k-points, so this '
+                           'plaquette is unreliable',
+                           smallest_sing_val, self.sing_val_thresh)
         return smallest_sing_val
 
     def check_wilson_loop_phases(self, wlevs):
@@ -160,7 +165,7 @@ class Overlaps:
         largest = 0.0
         for eig in wlevs:
             if np.abs(eig) > self.eig_thresh:
-                print(f'found eigenvalue {eig}; k-sampling is underconverged')
+                logger.warning('found eigenvalue %s; k-sampling is underconverged', eig)
             largest = max(largest, np.abs(eig))
         return largest
 
@@ -204,7 +209,7 @@ class Overlaps:
         dict_debug = {}
         
         for direction in ["x", "y", "z"]:
-            print(direction)
+            logger.debug('computing strings along %s', direction)
             strings = utils.get_strings(self.kpoint_list, direction)
             string_phases = []
             
@@ -288,8 +293,9 @@ class Overlaps:
     
     
     def get_spont_pol(self, elec_change):
-        # still hard coded for c direction polarization
-    
+        # Returns all three components. Valid only for an orthogonal cell:
+        # the fractional electronic change is scaled by a, b and c
+        # separately, which is not the general lattice transformation.
         ion_contrib = self.get_ionic_pol_change() # muC / cm^2
 
         lattice = self.pol_struct.lattice
@@ -302,8 +308,8 @@ class Overlaps:
         elec_contrib = np.array([elec_contrib_x, elec_contrib_y, elec_contrib_z]) # muC / cm^2
         
         
-        print(f'electronic contribution: {elec_contrib}')
-        print(f'ionic contribution: {ion_contrib}')
+        logger.info('electronic contribution: %s', elec_contrib)
+        logger.info('ionic contribution: %s', ion_contrib)
 
         return ion_contrib + elec_contrib
     
@@ -315,12 +321,12 @@ class Overlaps:
             self.spin_state = 0
             self.band_fill = self.band_fill_up
             strings_sum_up, strings_len_up, dict_debug_up = self.compute_string_sums()
-            print(f'string_sums_up: {strings_sum_up}')
+            logger.info('string_sums_up: %s', strings_sum_up)
 
             self.spin_state = 1
             self.band_fill = self.band_fill_down
             strings_sum_down, strings_len_down, dict_debug_down = self.compute_string_sums()
-            print(f'string_sums_up: {strings_sum_down}')
+            logger.info('string_sums_down: %s', strings_sum_down)
 
             occ_fact = 1
             elec_change = [occ_fact*(strings_sum_up[0] + strings_sum_down[0])/strings_len_up[0],
@@ -332,7 +338,7 @@ class Overlaps:
         else:
 
             strings_sum, strings_len, dict_debug = self.compute_string_sums()
-            print(f'string_sums: {strings_sum}')
+            logger.info('string_sums: %s', strings_sum)
 
             occ_fact = 2
             elec_change = [occ_fact * strings_sum[0] / strings_len[0],
@@ -351,6 +357,6 @@ class Overlaps:
                                 b * final_pol[1] +
                                 c * final_pol[2])
 
-        print(f'final_pol frac: {final_pol}')
-        print(f'polarization: {P_norm} muC / cm^2')
+        logger.info('final_pol frac: %s', final_pol)
+        logger.info('polarization: %s muC / cm^2', P_norm)
         return P_norm, dict_debug

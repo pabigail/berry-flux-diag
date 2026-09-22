@@ -1,5 +1,38 @@
 # src/berry_flux_diag/__init__.py
 
+import logging as _logging
+
+
+def configure_logging(level="INFO", stream=None):
+    """Send this package's log messages to the console.
+
+    The package logs rather than prints, so by default only warnings
+    surface and progress messages are silent. Call this once - in a
+    notebook or a script - to see them:
+
+        import berry_flux_diag as bfd
+        bfd.configure_logging()          # INFO: progress and results
+        bfd.configure_logging("DEBUG")   # adds per-direction detail
+
+    This touches only the berry_flux_diag logger, never the root logger,
+    so it cannot disturb the logging of a program that imports this
+    package. Calling it again replaces the handler rather than adding a
+    second one, so messages are not duplicated.
+    """
+    logger = _logging.getLogger(__name__)
+
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+
+    handler = _logging.StreamHandler(stream)
+    handler.setFormatter(_logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False
+
+    return logger
+
+
 # Core modules
 from . import constants
 from . import preprocess
