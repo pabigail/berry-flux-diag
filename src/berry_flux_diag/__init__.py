@@ -1,6 +1,7 @@
 # src/berry_flux_diag/__init__.py
 
 # Core modules
+from . import constants
 from . import preprocess
 from . import utils
 from . import Overlaps

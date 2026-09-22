@@ -2,6 +2,7 @@
 
 import numpy as np
 import berry_flux_diag.utils as utils
+from berry_flux_diag.constants import E_PER_ANG2_TO_MUC_PER_CM2
 from pymatgen.core.structure import Structure
 from pymatgen.util.coord_cython import pbc_shortest_vectors
 
@@ -234,13 +235,10 @@ class Overlaps:
             tot_ionic.append(self.calc_ionic(frac_coord, self.pol_struct, zval))
         ion_diff =  np.sum(tot_ionic, axis=0) # in electron Angstroms:
         
-        # convert to muC/cm^2
-        e_to_muC = -1.6021766e-13
-        cm2_to_A2 = 1e16
-        pol_volume = [self.pol_struct.lattice.volume]
-        pol_units = 1.0 / np.array(pol_volume)
-        pol_units *= e_to_muC * cm2_to_A2
-        ionic_contrib = pol_units * ion_diff # in muC/cm^2                      
+        # convert to muC/cm^2. The sign is negative because calc_ionic already
+        # returns -z*dr, so the two cancel to the usual +sum(z*dr).
+        pol_units = -E_PER_ANG2_TO_MUC_PER_CM2 / self.pol_struct.lattice.volume
+        ionic_contrib = pol_units * ion_diff # in muC/cm^2
         
         return ionic_contrib
     
@@ -251,14 +249,14 @@ class Overlaps:
     
         ion_contrib = self.get_ionic_pol_change() # muC / cm^2
 
-        elec_contrib_x = ((utils.ECHARGE * 10 ** 20) * np.array(elec_change[0]) * 
-                          self.pol_struct.lattice.a / self.pol_struct.lattice.volume)
-        elec_contrib_y = ((utils.ECHARGE * 10 ** 20) * np.array(elec_change[1]) * 
-                          self.pol_struct.lattice.b / self.pol_struct.lattice.volume)
-        elec_contrib_z = ((utils.ECHARGE * 10 ** 20) * np.array(elec_change[2]) * 
-                          self.pol_struct.lattice.c / self.pol_struct.lattice.volume)
-        
-        elec_contrib = 100 * np.array([elec_contrib_x, elec_contrib_y, elec_contrib_z]) # muC / cm^2
+        lattice = self.pol_struct.lattice
+        scale = E_PER_ANG2_TO_MUC_PER_CM2 / lattice.volume
+
+        elec_contrib_x = scale * np.array(elec_change[0]) * lattice.a
+        elec_contrib_y = scale * np.array(elec_change[1]) * lattice.b
+        elec_contrib_z = scale * np.array(elec_change[2]) * lattice.c
+
+        elec_contrib = np.array([elec_contrib_x, elec_contrib_y, elec_contrib_z]) # muC / cm^2
         
         
         print(f'electronic contribution: {elec_contrib}')

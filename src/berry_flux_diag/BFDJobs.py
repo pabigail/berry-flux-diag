@@ -1,5 +1,6 @@
 from jobflow import job, Flow, Response
 import berry_flux_diag as bfd
+from berry_flux_diag.constants import E_PER_ANG2_TO_MUC_PER_CM2
 from bfd import preprocess
 import numpy as np
 import os
@@ -85,9 +86,7 @@ def compute_elec_contrib(string_sums, string_lens, pol_struct: Structure, occ_fa
     a, b, c = lattice.a, lattice.b, lattice.c
     vol = lattice.volume
 
-    # Physical constants
-    ECHARGE = 1.6021766e-19  # C
-    scaling = 100 * ECHARGE * 1e20 / vol  # convert to μC/cm²
+    scaling = E_PER_ANG2_TO_MUC_PER_CM2 / vol  # convert to μC/cm²
 
     # Project onto lattice vectors
     elec_contrib = scaling * np.array([
@@ -153,9 +152,8 @@ def compute_ionic_contrib(pol_struct: Structure, np_struct: Structure, zval_dict
 
     ion_diff = np.sum(tot_ionic, axis=0)  # electron·Å
 
-    # Convert to μC/cm²
-    e_to_muC = -1.6021766e-13  # electron·Å⁻² to μC/cm²
-    scale = e_to_muC * 1e16 / pol_struct.lattice.volume  # 1e16 for Å² to cm²
+    # Convert to μC/cm². Negative because calc_ionic already returns -z*dr.
+    scale = -E_PER_ANG2_TO_MUC_PER_CM2 / pol_struct.lattice.volume
     ionic_contrib = scale * ion_diff  # μC/cm²
 
     return ionic_contrib

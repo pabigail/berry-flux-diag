@@ -31,6 +31,11 @@ from capture_reference import capture_qe, capture_vasp  # noqa: E402
 # so reordering the arithmetic (vectorizing, parallelizing) moves the last
 # couple of digits; anything larger is a real change. The polarization is in
 # uC/cm^2, where 1e-6 is far below any physically meaningful difference.
+#
+# Both comparisons below pass rtol=0 so these are the whole tolerance.
+# assert_allclose defaults to rtol=1e-7, which on a ~45 uC/cm^2 polarization
+# is 4.5e-6 - five times looser than the atol named here, and loose enough to
+# hide a changed physical constant.
 STRING_SUM_ATOL = 1e-10
 POLARIZATION_ATOL = 1e-6
 
@@ -54,12 +59,14 @@ def assert_matches_reference(result: dict, reference: dict) -> None:
     np.testing.assert_allclose(
         result["string_sums"],
         reference["string_sums"],
+        rtol=0,
         atol=STRING_SUM_ATOL,
         err_msg="electronic string sums drifted from the reference",
     )
     np.testing.assert_allclose(
         result["polarization_norm"],
         reference["polarization_norm"],
+        rtol=0,
         atol=POLARIZATION_ATOL,
         err_msg="polarization magnitude drifted from the reference",
     )

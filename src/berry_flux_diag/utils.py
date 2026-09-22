@@ -2,8 +2,6 @@ import numpy as np
 import re
 
 
-ECHARGE = 1.60217733 * 10**-19
-
 def direction_to_vals(direction):
     # THIS CODE DIRECTLY FROM BONINI
     if direction == 'z':
