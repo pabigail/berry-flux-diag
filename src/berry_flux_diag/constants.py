@@ -18,3 +18,11 @@ ELEMENTARY_CHARGE = 1.602176634e-19
 #
 # which is 1602.176634 uC/cm^2 per e/Ang^2.
 E_PER_ANG2_TO_MUC_PER_CM2 = ELEMENTARY_CHARGE * 1e16 * 1e6
+
+# Bohr radius in Angstrom, for the cell and atomic positions Quantum
+# ESPRESSO writes in atomic units. Unlike the elementary charge this is a
+# measured quantity, CODATA 2022: a0 = 5.29177210544(82)e-11 m. Its relative
+# uncertainty is about 1.6e-12, four orders of magnitude below the error
+# from truncating it, so carrying the full value costs nothing and removes
+# the question.
+BOHR_TO_ANGSTROM = 0.529177210544

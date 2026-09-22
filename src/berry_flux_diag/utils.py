@@ -91,40 +91,21 @@ def gvec_extrema(gvecs):
 
 def gvec_to_index(gvec, kpt, max_rad, base):
     # gvec: np.array [x, y, z] of current gvec
-    # kpt: g-vectors are shifted first by the kpoint of where the kpoint is located
+    # kpt: accepted but NOT applied, see below
     # max_rad: maximum radius of all gvecs considered
     # base: base of expansion for x*base**2 + y*base + z
-    
-    # not really sure about this kpt shift that may be rounded away
+
+    # The convention in force is that the index labels G alone, not G + k.
+    # Whether it should instead be centred on the k-point is unresolved; the
+    # shift is left commented out rather than removed so the question stays
+    # visible. Both structures are indexed the same way, so a consistent
+    # choice cancels in the overlap - which is why this has not shown up as
+    # a wrong answer. Pin the convention with a test before changing it.
     kpt_centered_gvec = gvec # + kpt
     shift = np.full(3, max_rad)
     shifted_gvec = kpt_centered_gvec + shift
     index = round(shifted_gvec[0])*base**2 + round(shifted_gvec[1])*base + round(shifted_gvec[2])
     return index
-
-
-def index_to_gvec(index, kpt, max_rad, base):
-    # index: shifted index correpsonding to a gvec
-    # kpt: kpoint corresponding to wavefunction coefficients of planewaves at give kpt
-    # max_rad: maximum radius of all gvecs considered
-    # base: base of expansion for x*base**2 + y*base + z
-    
-    # return: gvec = [x, y, z]
-    
-    x_shifted_gvec = np.floor(index / base**2)
-    y_shifted_gvec = np.floor((index - x_shifted_gvec*base**2)/ base)
-    z_shifted_gvec = index - x_shifted_gvec*base**2 - y_shifted_gvec*base
-    
-    shifted_gvec = np.array((x_shifted_gvec,
-                             y_shifted_gvec, 
-                             z_shifted_gvec))
-    
-    shift = np.full(3, max_rad)
-    kpt_centered_gvec = shifted_gvec - shift
-    # not totally sure about this rounding kpt value
-    gvec = np.around(kpt_centered_gvec - kpt)
-    
-    return gvec
 
 
 def map_coeffs(coeffs0, gvecs0, kpt0, coeffs1, gvecs1, kpt1):

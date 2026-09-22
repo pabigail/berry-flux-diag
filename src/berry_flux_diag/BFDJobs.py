@@ -18,7 +18,6 @@ from pathlib import Path
 import gzip
 import shutil
 from pymatgen.util.coord_cython import pbc_shortest_vectors
-import re
 
 
 def convert_complex(obj):
@@ -111,14 +110,6 @@ def calc_ionic(frac_coord, structure: Structure, zval: float) -> np.ndarray:
     return np.multiply(norms, -np.array(frac_coord) * zval)
 
 
-def extract_letters(input_string):
-    # Use a regular expression to match only the letters at the beginning of the string
-    match = re.match(r'^[A-Za-z]+', input_string)
-    if match:
-        return match.group(0)
-    return ''
-
-
 def compute_ionic_contrib(pol_struct: Structure, np_struct: Structure, zval_dict: dict):
     """
     Compute ionic contribution to polarization change between np_struct and pol_struct.
@@ -146,7 +137,7 @@ def compute_ionic_contrib(pol_struct: Structure, np_struct: Structure, zval_dict
     # Compute ionic dipole contribution per site
     tot_ionic = []
     for site, d_frac in zip(pol_struct, frac_coords_diff):
-        element = extract_letters(str(site.specie))
+        element = bfd.utils.extract_letters(str(site.specie))
         zval = zval_dict[element]
         tot_ionic.append(calc_ionic(d_frac, pol_struct, zval))  # electron·Å
 

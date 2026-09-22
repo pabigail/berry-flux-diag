@@ -4,12 +4,10 @@ import qeschema
 import h5py
 import numpy as np
 import berry_flux_diag.utils as utils
+from berry_flux_diag.constants import BOHR_TO_ANGSTROM
 
 def get_struct_from_qeschema(xml_data):
-    
-    # convert from Bohr to Angstrom
-    BOHR_TO_ANGSTROM = 0.5291772
-    
+
     atomic_struct = xml_data['qes:espresso']['output']['atomic_structure']
 
     lattice = [list(np.array(atomic_struct['cell']['a1'])*BOHR_TO_ANGSTROM),
