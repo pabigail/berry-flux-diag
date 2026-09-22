@@ -159,3 +159,56 @@ def extract_letters(input_string):
     if match:
         return match.group(0)
     return ''
+
+
+def max_filled_bands(occupations_by_kpoint, tol):
+    """Number of occupied bands, maximized over k-points.
+
+    Parameters
+    ----------
+    occupations_by_kpoint : iterable of sequences of float
+        One occupation sequence per k-point, each ordered by ascending band
+        energy. For a spin-polarized run, pass one channel at a time.
+    tol : float
+        A band counts as occupied when its occupation is at least this.
+
+    Returns
+    -------
+    int
+        The largest number of occupied bands found at any single k-point.
+
+    Raises
+    ------
+    ValueError
+        If any k-point has no occupied band at all, which means the tolerance
+        or the parsed occupations are wrong rather than that the system is
+        unusual.
+
+    Notes
+    -----
+    The count is taken from the index of the first band below tol: band
+    indices start at zero, so that index *is* the number of bands below it.
+
+    Every occupied band must be included in the Berry flux, so the maximum
+    over k-points is the right reduction. For an insulator the count is the
+    same at every k-point; a count that varies with k means bands cross the
+    Fermi level, and the polarization is not well defined. That case is not
+    diagnosed here yet.
+    """
+    max_fill = 0
+
+    for kpt_index, occupations in enumerate(occupations_by_kpoint):
+        # No band below tol means every band is occupied, so the count is the
+        # number of bands rather than an error.
+        fill = next((index for index, occ in enumerate(occupations) if occ < tol),
+                    len(occupations))
+
+        if fill == 0:
+            raise ValueError(
+                f"no occupied bands at k-point {kpt_index}: the lowest band has "
+                f"occupation {occupations[0]}, below the tolerance {tol}"
+            )
+
+        max_fill = max(max_fill, fill)
+
+    return max_fill

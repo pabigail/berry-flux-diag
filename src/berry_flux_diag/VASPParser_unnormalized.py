@@ -7,37 +7,19 @@ import berry_flux_diag.utils as utils
 
 def get_band_filling_from_wavecar_nospin(wavecar, tol):
 
-    max_band_fill = 0
     num_kpoints = np.array(wavecar.band_energy).shape[0]
+    occupations = (wavecar.band_energy[kpt][:, 2] for kpt in range(num_kpoints))
 
-    for kpt in range(0, num_kpoints):
-
-        band_filling = wavecar.band_energy[kpt][:, 2]
-        temp_band_index = next(index for index, i in enumerate(band_filling) if i < tol)
-        if temp_band_index != 0:
-            if (temp_band_index - 1) > max_band_fill:
-                max_band_fill = temp_band_index
-        else:
-            raise ValueError("band filling is zero")
-
-    return max_band_fill
+    return utils.max_filled_bands(occupations, tol)
 
 
 def get_band_filling_from_wavecar_spinpol(wavecar, tol, spin_channel):
 
-    max_band_fill = 0
     num_kpoints = np.array(wavecar.band_energy).shape[1]
+    occupations = (wavecar.band_energy[spin_channel][kpt][:, 2]
+                   for kpt in range(num_kpoints))
 
-    for kpt in range(0, num_kpoints):
-        band_filling = wavecar.band_energy[spin_channel][kpt][:, 2]
-        temp_band_index = next(index for index, i in enumerate(band_filling) if i < tol)
-        if temp_band_index != 0:
-            if (temp_band_index - 1) > max_band_fill:
-                max_band_fill = temp_band_index
-        else:
-            raise ValueError("band filling is zero")
-
-    return max_band_fill
+    return utils.max_filled_bands(occupations, tol)
 
 
 def get_wfcn_dict_from_vasp(wavecar, kpoint_list, spin_pol):

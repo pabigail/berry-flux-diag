@@ -50,60 +50,27 @@ def get_kpt_list_from_qeschema(xml_data):
 
 def get_band_filling_from_qeschema_nospin(xml_data, tol):
 
-    max_band_fill = 0
     band_struct_dict = xml_data['qes:espresso']['output']['band_structure']
     ks_energies = band_struct_dict['ks_energies']
 
-    for kpt in ks_energies:
-        band_filling = kpt['occupations']['$']
-        if band_filling[-1] >= tol:
-            temp_band_index = len(band_filling)
-        else:
-            temp_band_index = next(index for index, i in enumerate(band_filling) if i < tol)
+    occupations = (kpt['occupations']['$'] for kpt in ks_energies)
 
-        if temp_band_index != 0:
-            if (temp_band_index - 1) > max_band_fill:
-                max_band_fill = temp_band_index
-        else:
-            raise ValueError("band filling is zero")
-
-    return max_band_fill
+    return utils.max_filled_bands(occupations, tol)
 
 def get_band_filling_from_qeschema_spinpol(xml_data, tol):
 
-    max_band_fill_up = 0
-    max_band_fill_dw = 0
     band_struct_dict = xml_data['qes:espresso']['output']['band_structure']
     ks_energies = band_struct_dict['ks_energies']
     nband_up = band_struct_dict['nbnd_up']
     nband_dw = band_struct_dict['nbnd_dw']
 
-    for kpt in ks_energies:
-        band_filling_up = kpt['occupations']['$'][0:nband_up]
-        band_filling_dw = kpt['occupations']['$'][nband_up:nband_up+nband_dw]
+    # QE writes both spin channels end to end in one occupations array.
+    occupations_up = (kpt['occupations']['$'][0:nband_up] for kpt in ks_energies)
+    occupations_dw = (kpt['occupations']['$'][nband_up:nband_up + nband_dw]
+                      for kpt in ks_energies)
 
-        if band_filling_up[-1] >= tol:
-            temp_band_index_up = nband_up
-        else:
-            temp_band_index_up = next(index for index,
-                                      i in enumerate(band_filling_up) if i < tol)
-
-        if band_filling_dw[-1] >= tol:
-            temp_band_index_dw = nband_dw
-        else:
-            temp_band_index_dw = next(index for index,
-                                      i in enumerate(band_filling_dw) if i < tol)
-
-        if temp_band_index_up != 0 and temp_band_index_dw != 0:
-
-            if (temp_band_index_up - 1) > max_band_fill_up:
-                max_band_fill_up = temp_band_index_up
-
-            if (temp_band_index_dw - 1) > max_band_fill_dw:
-                max_band_fill_dw = temp_band_index_dw
-
-        else:
-            raise ValueError("band filling is zero")
+    max_band_fill_up = utils.max_filled_bands(occupations_up, tol)
+    max_band_fill_dw = utils.max_filled_bands(occupations_dw, tol)
 
     return max_band_fill_up, max_band_fill_dw
 
