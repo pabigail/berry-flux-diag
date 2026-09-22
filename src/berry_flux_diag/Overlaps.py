@@ -7,17 +7,38 @@ from pymatgen.core.structure import Structure
 from pymatgen.util.coord_cython import pbc_shortest_vectors
 
 
+# Diagnostic thresholds. Neither is a physical constant: both flag a k-mesh
+# too coarse for the phase to be tracked from one k-point to the next, and
+# both are warnings rather than errors.
+
+# A Wilson loop phase lives in (-pi, pi]. One approaching the branch cut at
+# +/- pi cannot be assigned to a branch with confidence, so the loop sum
+# becomes unreliable. 2.8 rad is about 0.891 pi, i.e. within 11% of the cut.
+EIG_THRESH = 2.8
+
+# Singular values of the overlap matrix between the occupied manifolds at
+# two adjacent k-points: 1 is perfect overlap, 0 means a band has rotated
+# entirely out of the manifold. When the smallest approaches 0 the unitary
+# recovered as u @ v is reconstructing a nearly singular rotation, and the
+# parallel transport through that plaquette cannot be trusted.
+SING_VAL_THRESH = 0.2
+
+
 class Overlaps:
     
-    def __init__(self, parse_dict):
+    def __init__(self, parse_dict, eig_thresh=EIG_THRESH,
+                 sing_val_thresh=SING_VAL_THRESH):
         ''' intialize using vasp_parse_dict or qe_parse_dict
-        
-            pol_struct: pymatgen structure 
+
+            pol_struct: pymatgen structure
             np_struct: pymatgen structure
             kpoint_list: list of np arrays
             pol_wave_coeffs: numpy array of coefficients in the format
             np_wave_coeffs: numpy array of coefficients in the format
-            
+
+            eig_thresh: warn above this Wilson loop phase, in radians
+            sing_val_thresh: warn below this overlap singular value
+
             in this version, no spin polarization, must use full k-grid (not IBZ)
          '''
         self.pol_struct = parse_dict['pol_struct']
@@ -28,7 +49,8 @@ class Overlaps:
 #         self.band_fill = np.min([parse_dict['pol_band_fill'], 
 #                                  parse_dict['np_band_fill']]) # changed this from np.max to np.min
         self.zval_dict = parse_dict['zval_dict']
-        self.eig_thresh = 2.8
+        self.eig_thresh = eig_thresh
+        self.sing_val_thresh = sing_val_thresh
         self.ES_code = parse_dict['ES_code']
         self.spin_pol = parse_dict['spin_pol']
         self.spin_state = 0 # this only matters for spin-polarized calculations
@@ -117,6 +139,31 @@ class Overlaps:
         return pw_coeffs, gvecs                         
     
     
+    def check_overlap_conditioning(self, s):
+        """Warn when the occupied manifolds at adjacent k-points barely overlap.
+
+        Returns the smallest singular value so a caller can record it
+        without walking the debug payload afterwards.
+        """
+        smallest_sing_val = min(s)
+        if smallest_sing_val < self.sing_val_thresh:
+            print(f'min singular value {smallest_sing_val} is below '
+                  f'{self.sing_val_thresh}; occupied bands barely overlap '
+                  f'between adjacent k-points, so this plaquette is unreliable')
+        return smallest_sing_val
+
+    def check_wilson_loop_phases(self, wlevs):
+        """Warn when a Wilson loop phase approaches the branch cut at +/- pi.
+
+        Returns the largest phase magnitude found.
+        """
+        largest = 0.0
+        for eig in wlevs:
+            if np.abs(eig) > self.eig_thresh:
+                print(f'found eigenvalue {eig}; k-sampling is underconverged')
+            largest = max(largest, np.abs(eig))
+        return largest
+
     # get unitary along path
     def get_unitary_along_path(self, loop_path, direction):
         path_pairs = zip(loop_path[:-1], loop_path[1:])
@@ -134,9 +181,7 @@ class Overlaps:
             # compute each overlap on-the-fly
             M = self.compute_overlap(l0, kpt0, l1, kpt1, direction)
             u, s, v = np.linalg.svd(M)
-            smallest_sing_val = min(s)
-            if smallest_sing_val < 0.2:
-                print(f'min singular value: {min(s)}')
+            self.check_overlap_conditioning(s)
             curly_M = np.dot(u, v)
             curly_U = np.dot(curly_U, curly_M)
             
@@ -179,9 +224,7 @@ class Overlaps:
                                  (0, kpt0)]
                     curly_U, dict_svd = self.get_unitary_along_path(loop_path, direction)
                     wlevs = np.log(np.linalg.eigvals(curly_U)).imag
-                    for eig in wlevs:
-                        if np.abs(eig) > 2.8:
-                            print(f'found eigenvalue {eig}; k-sampling is underconverged')
+                    self.check_wilson_loop_phases(wlevs)
                     inner_loop_sum += sum(wlevs) / (2 * np.pi)
                     
                     # save for debugging
