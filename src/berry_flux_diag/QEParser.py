@@ -241,11 +241,19 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
     
     pol_struct = get_struct_from_qeschema(pol_xml_data)
     np_struct = get_struct_from_qeschema(np_xml_data)
-    
-    kpoint_list = get_kpt_list_from_qeschema(pol_xml_data)
-    # round k-point list so can find matching k-points
-    kpoint_list = [np.around(kpt, 6) for kpt in kpoint_list]
-    
+    utils.check_species_match(pol_struct, np_struct)
+
+    # round k-point lists so can find matching k-points
+    kpoint_list = [np.around(kpt, 6)
+                   for kpt in get_kpt_list_from_qeschema(pol_xml_data)]
+    np_kpoint_list = [np.around(kpt, 6)
+                      for kpt in get_kpt_list_from_qeschema(np_xml_data)]
+
+    # Only the polar list is carried forward, so the two runs must agree.
+    utils.check_kpoints_match(kpoint_list, np_kpoint_list)
+    utils.check_full_bz(kpoint_list)
+
+
     pw_out = PWOutput(pw_out_path)
     zval_dict = get_zval_dict_from_PWOutput(pw_out)
     spin_pol_pol = get_spin_pol_from_qeschema(pol_xml_data)

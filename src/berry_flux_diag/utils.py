@@ -142,6 +142,113 @@ def extract_letters(input_string):
     return ''
 
 
+def check_kpoints_match(pol_kpoints, np_kpoints, tol=1e-5):
+    """Require both runs to sample the same k-points in the same order.
+
+    The README states that the two calculations must use the same k-point
+    mesh, but nothing enforced it. The parsers build both wavefunction
+    dictionaries from a single k-point list - the polar one - while reading
+    each run's coefficients positionally, so a difference in ordering would
+    quietly label one run's coefficients with the other run's k-points and
+    produce a plausible, wrong answer rather than an error.
+
+    Raises
+    ------
+    ValueError
+        If the two lists differ in length, or if any pair differs by more
+        than tol in any component.
+    """
+    if len(pol_kpoints) != len(np_kpoints):
+        raise ValueError(
+            f"the two runs have different numbers of k-points: "
+            f"{len(pol_kpoints)} in the polar run, {len(np_kpoints)} in the "
+            f"non-polar run; both must use the same mesh"
+        )
+
+    pol = np.asarray(pol_kpoints, dtype=float)
+    nonpol = np.asarray(np_kpoints, dtype=float)
+
+    mismatched = np.flatnonzero(np.abs(pol - nonpol).max(axis=1) > tol)
+    if mismatched.size:
+        first = mismatched[0]
+        raise ValueError(
+            f"the two runs sample different k-points: at index {first} the "
+            f"polar run has {pol[first]} and the non-polar run has "
+            f"{nonpol[first]} ({mismatched.size} of {len(pol)} differ). Both "
+            f"runs must use the same mesh, in the same order."
+        )
+
+
+def check_species_match(pol_struct, np_struct):
+    """Require the same atoms in the same order in both structures.
+
+    Every site is paired with the site at the same index when computing
+    displacements and interpolating, so a different ordering pairs the
+    wrong atoms and a different count pairs some atom with nothing.
+
+    Raises
+    ------
+    ValueError
+        If the structures differ in atom count or in species order.
+    """
+    pol_species = [str(site.specie) for site in pol_struct]
+    np_species = [str(site.specie) for site in np_struct]
+
+    if len(pol_species) != len(np_species):
+        raise ValueError(
+            f"the two structures have different numbers of atoms: "
+            f"{len(pol_species)} in the polar structure, {len(np_species)} in "
+            f"the non-polar structure"
+        )
+
+    for index, (pol_specie, np_specie) in enumerate(zip(pol_species, np_species)):
+        if pol_specie != np_specie:
+            raise ValueError(
+                f"the two structures list different species at site {index}: "
+                f"{pol_specie} in the polar structure, {np_specie} in the "
+                f"non-polar structure. Both must list the same atoms in the "
+                f"same order."
+            )
+
+
+def check_full_bz(kpoint_list, tol=1e-5):
+    """Require a k-point set covering the whole Brillouin zone.
+
+    The Berry flux is summed over closed strings that wrap the zone, so an
+    irreducible wedge does not merely lose accuracy - get_strings builds
+    strings that do not close, and the result is meaningless rather than
+    approximate.
+
+    The test is that the number of k-points equals the product of the
+    distinct values found along each axis, which holds for a regular mesh
+    over the full zone and fails for a wedge. That is a necessary
+    condition rather than a sufficient one: it is meant to catch a
+    symmetry-reduced run, not to validate an arbitrary k-point set.
+
+    Raises
+    ------
+    ValueError
+        If the k-points do not form a complete regular mesh.
+    """
+    if len(kpoint_list) == 0:
+        raise ValueError("the k-point list is empty")
+
+    kpoints = np.asarray(kpoint_list, dtype=float)
+    decimals = max(0, int(round(-np.log10(tol))))
+
+    mesh = [len(np.unique(np.round(kpoints[:, axis], decimals))) for axis in range(3)]
+    expected = int(np.prod(mesh))
+
+    if expected != len(kpoints):
+        raise ValueError(
+            f"the k-points do not span the full Brillouin zone: found "
+            f"{len(kpoints)} k-points, but the distinct values along each axis "
+            f"imply a {mesh[0]}x{mesh[1]}x{mesh[2]} mesh of {expected}. This is "
+            f"what a symmetry-reduced run looks like. Rerun with ISYM = -1 "
+            f"(VASP) or nosym = .true. and noinv = .true. (Quantum ESPRESSO)."
+        )
+
+
 def max_filled_bands(occupations_by_kpoint, tol):
     """Number of occupied bands, maximized over k-points.
 

@@ -143,6 +143,7 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR):
     """
     pol_struct = Structure.from_file(pol_POSCAR)
     np_struct = Structure.from_file(np_POSCAR)
+    utils.check_species_match(pol_struct, np_struct)
 
     pol_wavecar = Wavecar(pol_WAVECAR)
     np_wavecar = Wavecar(np_WAVECAR)
@@ -170,10 +171,14 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR):
 
     spin_pol = pol_spin_pol # Boolean if calculation is spin polarized or not
 
-    # only works for full Brillouin zone
-    kpoint_list = pol_wavecar.kpoints
-    # round k-point list so can find matching k-points
-    kpoint_list = [np.around(kpt, 6) for kpt in kpoint_list]
+    # round k-point lists so can find matching k-points
+    kpoint_list = [np.around(kpt, 6) for kpt in pol_wavecar.kpoints]
+    np_kpoint_list = [np.around(kpt, 6) for kpt in np_wavecar.kpoints]
+
+    # Only the polar list is carried forward, and each run's coefficients are
+    # read positionally against it, so the two runs must agree exactly.
+    utils.check_kpoints_match(kpoint_list, np_kpoint_list)
+    utils.check_full_bz(kpoint_list)
 
 
     if spin_pol:

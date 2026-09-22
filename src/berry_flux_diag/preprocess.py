@@ -8,10 +8,17 @@ from pymatgen.io.vasp import Poscar
 import re
 import os
 
+import berry_flux_diag.utils as utils
+
 logger = logging.getLogger(__name__)
 
 def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
                        num_interps = 'auto', MAX_DISP=0.3):
+
+    # Every site is paired with the site at the same index from here on, by
+    # calc_max_disp and by interpolate, so check the pairing is meaningful
+    # before either runs.
+    utils.check_species_match(pol_orig_struct, np_orig_struct)
 
     # find translation that minimizes max atomic displacement between pol and np structs
     if translate:

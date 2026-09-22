@@ -211,6 +211,12 @@ class Overlaps:
         for direction in ["x", "y", "z"]:
             logger.debug('computing strings along %s', direction)
             strings = utils.get_strings(self.kpoint_list, direction)
+            if not strings:
+                raise ValueError(
+                    f"no k-point strings found along {direction} in a list of "
+                    f"{len(self.kpoint_list)} k-points; the mesh does not span "
+                    f"the Brillouin zone in that direction"
+                )
             string_phases = []
             
             # save for debugging
@@ -238,10 +244,9 @@ class Overlaps:
                     dict_eigs['eigs'].append(wlevs)
                     
                 string_phases.append(inner_loop_sum)
-                string_sum = sum(string_phases)
-                
+
             dict_debug[direction] = dict_eigs
-            strings_sums.append(string_sum)
+            strings_sums.append(sum(string_phases))
             strings_len.append(len(strings))
         return strings_sums, strings_len, dict_debug
     
