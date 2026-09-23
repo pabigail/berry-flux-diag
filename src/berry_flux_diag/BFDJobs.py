@@ -1,7 +1,7 @@
 from jobflow import job, Flow, Response
 import berry_flux_diag as bfd
 from berry_flux_diag.constants import E_PER_ANG2_TO_MUC_PER_CM2
-from bfd import preprocess
+from berry_flux_diag import preprocess
 import numpy as np
 import os
 from monty.serialization import dumpfn
@@ -151,41 +151,24 @@ def compute_ionic_contrib(pol_struct: Structure, np_struct: Structure, zval_dict
 
 
 @job
-def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True, num_interps='auto', max_disp=0.3):
+def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True,
+                       num_interps='auto', max_disp=0.3):
+    """Jobflow wrapper around preprocess.preprocess_POSCARS.
 
-    structs = []
-    
-    # find translation that minimizes max atomic displacement between pol and np structs
-    if translate:
-        pol_orig_struct, np_trans_struct, orig_max_disp, translation = preprocess.translate_poscars(pol_orig_POSCAR_file,
-                                                                                               np_orig_POSCAR_file)
-    else:
-        pol_orig_struct = Structure.from_file(pol_orig_POSCAR_file)
-        np_trans_struct = Structure.from_file(np_orig_POSCAR_file) 
+    This used to reimplement that function rather than call it, and the
+    copy had drifted: it called preprocess.translate_poscars, which does
+    not exist, so the default path raised AttributeError; and with
+    translate=False it left orig_max_disp and translation unbound, so that
+    path raised UnboundLocalError a few lines later. Neither could have
+    run. Delegating keeps the interpolation logic in one place, and in the
+    module that can be imported and tested without atomate2.
+    """
+    return preprocess.preprocess_POSCARS(pol_orig_POSCAR_file,
+                                         np_orig_POSCAR_file,
+                                         translate=translate,
+                                         num_interps=num_interps,
+                                         MAX_DISP=max_disp)
 
-    # compute number of interpolated structures to ensure max atomic distance is below max_disp if num_interps not specified
-    if num_interps == 'auto':
-        num_interps = int(np.ceil(orig_max_disp/max_disp))
-    elif not isinstance(num_interps, int) or num_interps < 0:
-        raise TypeError("num_interps must be a non-negative integer or the string 'auto'")
-
-    # get interpolated structures if necessary
-    if orig_max_disp > max_disp:
-        structs = pol_orig_struct.interpolate(np_trans_struct, num_interps, interpolate_lattices=True)
-    else:
-        structs = [pol_orig_struct, np_trans_struct]
-
-    adj_max_disp = preprocess.max_atomic_displacement_between_adjacent_structs(structs)
-    
-    return {
-        "pol_orig_struct": pol_orig_struct,
-        "np_orig_struct": Structure.from_file(np_orig_POSCAR_file),
-        "np_trans_struct": np_trans_struct,
-        "structs": structs, 
-        "orig_max_disp": orig_max_disp, 
-        "adj_max_disp": adj_max_disp,
-        "translation": translation
-    }
 
 @job
 def scf_with_fixed_kpoints(
@@ -365,6 +348,9 @@ def bfd_schema(preprocess_output,
         "np_trans_struct": preprocess_output["np_trans_struct"],
         "structs": preprocess_output["structs"],
         "orig_max_disp": preprocess_output["orig_max_disp"],
+        # The displacement after translation, which is what the number of
+        # interpolated images was actually decided from.
+        "trans_max_disp": preprocess_output["trans_max_disp"],
         "adj_max_disp": preprocess_output["adj_max_disp"],
         "translation": preprocess_output["translation"],
         "kpoints": scf_output["kpoints"],

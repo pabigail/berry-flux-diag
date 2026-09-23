@@ -14,7 +14,21 @@ logger = logging.getLogger(__name__)
 
 def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
                        num_interps = 'auto', MAX_DISP=0.3):
+    """Translate, then interpolate, the pair of reference structures.
 
+    Returns a dict with both displacements: ``orig_max_disp`` between the
+    structures as given, and ``trans_max_disp`` after the translation -
+    which is the one the interpolation count is decided from, since the
+    translated structure is the one that gets interpolated.
+
+    Those used to be the same number. The count was taken from the
+    untranslated displacement while the interpolation ran on the
+    translated structure, so every image the translation made unnecessary
+    was still generated. Translation only ever reduces the displacement,
+    so the error was always in the direction of too many images rather
+    than too few - the guarantee the README states was never broken, but
+    each surplus image is a full SCF run.
+    """
     # Every site is paired with the site at the same index from here on, by
     # calc_max_disp and by interpolate, so check the pairing is meaningful
     # before either runs.
@@ -22,19 +36,28 @@ def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
 
     # find translation that minimizes max atomic displacement between pol and np structs
     if translate:
-        np_trans_struct = translate_structs(pol_orig_struct, np_orig_struct)
+        translation = find_translation(pol_orig_struct, np_orig_struct)
+        np_trans_struct = translate_structs(pol_orig_struct, np_orig_struct,
+                                            translation)
     else:
+        translation = np.zeros(3)
         np_trans_struct = np_orig_struct
-    
+
     orig_max_disp = calc_max_disp(pol_orig_struct, np_orig_struct)
+    trans_max_disp = calc_max_disp(pol_orig_struct, np_trans_struct)
+
+    if translate:
+        logger.info("translation %s reduced the maximum displacement from "
+                    "%.4f to %.4f Angstrom",
+                    np.round(translation, 4), orig_max_disp, trans_max_disp)
 
     # compute number of interpolated structures to ensure max atomic distance is below max_disp in num_interps is not specified
     if num_interps == 'auto':
-        num_interps = int(np.ceil(orig_max_disp/MAX_DISP))
+        num_interps = int(np.ceil(trans_max_disp/MAX_DISP))
     elif not isinstance(num_interps, int) or num_interps < 0:
         raise TypeError("num_interps must be a non-negative integer or the string 'auto'")
 
-    if orig_max_disp > MAX_DISP:
+    if trans_max_disp > MAX_DISP:
         structs = pol_orig_struct.interpolate(np_trans_struct, num_interps, interpolate_lattices=True)
     else:
         structs = [pol_orig_struct, np_trans_struct]
@@ -47,8 +70,19 @@ def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
          "np_trans_struct": np_trans_struct,
          "structs": structs,
          "orig_max_disp": orig_max_disp,
+         "trans_max_disp": trans_max_disp,
          "adj_max_disp": adj_max_disp,
+         "translation": translation,
      }
+
+
+def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True,
+                       num_interps='auto', MAX_DISP=0.3):
+    """preprocess_structs, reading the two structures from POSCAR files."""
+    return preprocess_structs(Structure.from_file(pol_orig_POSCAR_file),
+                              Structure.from_file(np_orig_POSCAR_file),
+                              translate=translate, num_interps=num_interps,
+                              MAX_DISP=MAX_DISP)
 
 
 def get_refined_oshift(st_a,st_b,grid_range=0.1):
@@ -76,12 +110,20 @@ def calc_max_disp(struct_a, struct_b, trans=None):
     return max_disp
 
 
+def find_translation(pol_struct, np_struct):
+    """The rigid shift of np_struct that minimises the maximum displacement.
+
+    Split out of translate_structs so that callers can report the shift
+    they applied, rather than only the structure that came back.
+    """
+    max_disps = get_refined_oshift(np_struct, pol_struct)
+    return min(max_disps, key=lambda x: x[1])[0]
+
+
 def translate_structs(pol_struct, np_struct, translation=None):
 
     if translation is None:
-        max_disps = get_refined_oshift(np_struct, pol_struct)
-        sorted_max_disps = sorted(max_disps, key=lambda x: x[1])
-        translation = sorted_max_disps[0][0]
+        translation = find_translation(pol_struct, np_struct)
 
     np_trans_struct = np_struct.copy()
     np_trans_struct.translate_sites(range(len(np_trans_struct)), translation)
@@ -136,7 +178,7 @@ def poscar_to_qe_io_scf_nomag(structure, material, tag, sym,
     material: name of material in string form, ex "BaTiO3"
     tag: for naming prefix and QE input file ex "np_orig" or "trans_1" or "interp_1"
     sym: boolean (true or false)
-    pseudo_dir: location of psuedopotential files
+    pseudo_dir: location of pseudopotential files
     kpoints_grid: ex (5, 5, 5)
     kshift: either (0, 0, 0) or (1, 1, 1)
     species_dict: contains atoms and materials
@@ -247,7 +289,7 @@ def parse_qe_input(input_file):
     control_dict = {}
     system_dict = {}
     electrons_dict = {}
-    species_dict = {"species": [], "masses": [], "psuedos": []}
+    species_dict = {"species": [], "masses": [], "pseudos": []}
     k_points_dict = {"setting": "", "k_points": (), "k_shift": ()}
     atomic_positions = []
     cell_parameters = []
@@ -303,7 +345,7 @@ def parse_qe_input(input_file):
             species, mass, pseudo = line.split()
             species_dict["species"].append(species)
             species_dict["masses"].append(float(mass))
-            species_dict["psuedos"].append(pseudo)
+            species_dict["pseudos"].append(pseudo)
         elif current_section == "atomic_positions" and line:
             atomic_positions.append(line.split())
         elif current_section == "k_points" and line:
@@ -376,7 +418,7 @@ def write_qe_input(control_dict, system_dict, electron_dict, species_dict, kpoin
 
         # Write ATOMIC_SPECIES section
         f.write("ATOMIC_SPECIES\n")
-        for species, mass, pseudo in zip(species_dict['species'], species_dict['masses'], species_dict['psuedos']):
+        for species, mass, pseudo in zip(species_dict['species'], species_dict['masses'], species_dict['pseudos']):
             f.write(f"  {species} {mass} {pseudo}\n")
 
         # Write ATOMIC_POSITIONS section
