@@ -249,6 +249,74 @@ def check_full_bz(kpoint_list, tol=1e-5):
         )
 
 
+def check_wavecar_type(vasp_type, label=""):
+    """Require a WAVECAR from the standard VASP build.
+
+    Parameters
+    ----------
+    vasp_type : str
+        The type pymatgen determined, one of "std", "gam" or "ncl" - that
+        is, ``Wavecar.vasp_type`` after construction, not the argument
+        passed in. Constructing with ``vasp_type=None`` lets pymatgen
+        detect it from the plane-wave count.
+    label : str, optional
+        Which run this is, for the error message.
+
+    Raises
+    ------
+    NotImplementedError
+        For a gamma-only or a noncollinear WAVECAR.
+
+    Notes
+    -----
+    This used to be moot, because the type was pinned to "std" at the call
+    site rather than detected. Pinning it does not make a WAVECAR standard;
+    for a noncollinear one it makes the file parse *incorrectly and
+    silently*. pymatgen accepts the pinned type whenever the plane-wave
+    count is either the G-point count or twice it, and a noncollinear
+    WAVECAR satisfies the second, so the check passes. It then skips the
+    reshape to (2, nplane // 2) that a "ncl" file needs, and the two spinor
+    components are handed downstream as one flat array of scalar
+    coefficients, twice as long as the G-vector list it is indexed against.
+    Nothing raises. The polarization is simply wrong.
+    """
+    where = f" for the {label} run" if label else ""
+
+    # Tested before the first-letter match below, which "None" would
+    # otherwise satisfy as a noncollinear run.
+    if not isinstance(vasp_type, str):
+        raise ValueError(
+            f"unrecognised WAVECAR type {vasp_type!r}{where}; expected one of "
+            f"'std', 'gam' or 'ncl'. pymatgen sets Wavecar.vasp_type during "
+            f"construction, so None here means the WAVECAR was never read."
+        )
+
+    kind = vasp_type.lower()[:1]
+
+    if kind == "g":
+        raise NotImplementedError(
+            f"the WAVECAR{where} is from the gamma-only VASP build (vasp_gam), "
+            f"which samples the single k-point at Gamma. A Berry flux is a sum "
+            f"over strings of k-points that wrap the Brillouin zone, so one "
+            f"k-point cannot give a polarization. Rerun with the standard "
+            f"build on a full k-point mesh, with ISYM = -1."
+        )
+
+    if kind == "n":
+        raise NotImplementedError(
+            f"the WAVECAR{where} is noncollinear (vasp_ncl), which "
+            f"berry_flux_diag does not support: it stores a two-component "
+            f"spinor per plane wave, and the overlaps computed here assume a "
+            f"scalar wavefunction. Use a collinear calculation."
+        )
+
+    if kind != "s":
+        raise ValueError(
+            f"unrecognised WAVECAR type {vasp_type!r}{where}; expected one of "
+            f"'std', 'gam' or 'ncl'"
+        )
+
+
 def max_filled_bands(occupations_by_kpoint, tol):
     """Number of occupied bands, maximized over k-points.
 

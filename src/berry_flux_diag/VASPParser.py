@@ -13,6 +13,29 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Cutoff in eV for pawpyseed's momentum grid. PINNED, NOT JUSTIFIED.
+#
+# pawpyseed's own default is 4 x the run's ENCUT, and that is the physically
+# motivated choice: the matrix elements are <psi|exp(iG.r)|psi>, which needs G
+# out to twice the wavefunction's G_max, and energy goes as G squared, so twice
+# the radius is four times the energy. The grid holds every G at or below the
+# cutoff, and get_reciprocal_fullfw projects each state onto it, so the cutoff
+# is the size of the basis the wavefunction is re-expressed in.
+#
+# 1000 eV is a fixed number standing in for a quantity that scales with ENCUT.
+# For a run at ENCUT = 520 eV the cutoff should be 2080 eV, so this grid holds
+# roughly (1000/2080)^(3/2) - about a third - of the plane waves pawpyseed
+# considers necessary, and every state is projected onto a basis too small to
+# hold it. The shortfall is material-dependent: softer potentials are affected
+# less, harder ones more.
+#
+# It is kept only because moving it moves the VASP polarization, and there is
+# nothing yet to move it against - tests/reference/batio3_vasp_nospin.json does
+# not exist, because capturing it needs MKL and so has to happen on NERSC.
+# Capture that fixture at this value first, then set this to None (pawpyseed's
+# default), recapture, and record both numbers.
+MOMENTUM_ENCUT = 1000
+
 def get_band_filling_from_wavecar_nospin(wavecar, tol):
 
     num_kpoints = np.array(wavecar.band_energy).shape[0]
@@ -78,8 +101,21 @@ def get_wfcn_dict_from_vasp(wavecar, kpoint_list, spin_pol):
         return wfcn_dict, max_band_fill
 
 # only works for non-spin-polarized wavefunctions...
-def get_wfcn_data_from_vasp_pawpy(wavecar_file, potcar_file, vasprun_file, max_band_fill, cutoff=1000):
-    
+def get_wfcn_data_from_vasp_pawpy(wavecar_file, potcar_file, vasprun_file,
+                                  max_band_fill, momentum_encut=MOMENTUM_ENCUT):
+    """PAW-reconstructed coefficients on pawpyseed's momentum grid.
+
+    Parameters
+    ----------
+    momentum_encut : float or None
+        Plane-wave cutoff in eV defining pawpyseed's momentum grid.
+        Defaults to MOMENTUM_ENCUT, which is pinned at the historical
+        value rather than chosen - read the comment on it. Pass None for
+        pawpyseed's own default of four times the run's ENCUT, which is
+        the physically motivated choice, at the cost of changing the
+        answer relative to every VASP number this code has produced so
+        far.
+    """
     # wavefunctions and momentum matrix objects
     vr = Vasprun(vasprun_file)
     structure = vr.final_structure
@@ -88,7 +124,28 @@ def get_wfcn_data_from_vasp_pawpy(wavecar_file, potcar_file, vasprun_file, max_b
     potcar = Potcar.from_file(potcar_file)
     pwf = pawpyc.PWFPointer(wavecar_file, vr)
     wf = Wavefunction(structure, pwf, CoreRegion(potcar), dim, symprec, True)
-    mm = MomentumMatrix(wf, cutoff)
+
+    # Report the cutoff against pawpyseed's own, so that a pinned value too
+    # small for the run says so at the time it is used rather than only in a
+    # comment. The plane-wave count goes as the cutoff to the 3/2.
+    pawpy_default = 4 * wf.encut
+
+    if momentum_encut is None:
+        logger.info("momentum grid cutoff: pawpyseed default, 4 x ENCUT = %s eV",
+                    pawpy_default)
+    elif momentum_encut < pawpy_default:
+        logger.warning(
+            "momentum grid cutoff is %s eV, below pawpyseed's default of "
+            "4 x ENCUT = %s eV for this run: the grid holds roughly %.0f%% of "
+            "the plane waves it would otherwise, so each state is projected "
+            "onto a basis too small to hold it. See VASPParser.MOMENTUM_ENCUT.",
+            momentum_encut, pawpy_default,
+            100 * (momentum_encut / pawpy_default) ** 1.5)
+    else:
+        logger.info("momentum grid cutoff: %s eV (pawpyseed default is "
+                    "4 x ENCUT = %s eV)", momentum_encut, pawpy_default)
+
+    mm = MomentumMatrix(wf, momentum_encut)
 
     # g-point grid and number of k-points
     gpoints = mm.momentum_grid
@@ -106,23 +163,28 @@ def get_wfcn_data_from_vasp_pawpy(wavecar_file, potcar_file, vasprun_file, max_b
     
     return gpoints, ngpoints, wfc_data
 
-def wfcn_dict_from_pawpy(wavecar_file, potcar_file, vasprun_file, max_band_fill, kpoint_list):
+def wfcn_dict_from_pawpy(wavecar_file, potcar_file, vasprun_file, max_band_fill,
+                         kpoint_list, momentum_encut=MOMENTUM_ENCUT):
     """
     Generate wfcn_dict from PAWPyseed wavefunction data.
     The dictionary maps each k-point to its corresponding wavefunction coefficients and g-vectors.
-    
+
     Inputs:
         wavecar_file (str): Path to WAVECAR
         potcar_file (str): Path to POTCAR
         vasprun_file (str): Path to vasprun.xml
         kpoint_list (List[np.ndarray]): List of k-points (fractional coordinates)
+        momentum_encut (float, None): momentum grid cutoff in eV; defaults
+            to the pinned MOMENTUM_ENCUT, None uses pawpyseed's 4 x ENCUT.
+            See get_wfcn_data_from_vasp_pawpy.
 
     Returns:
         dict: {kpt (tuple): {'wfcn': array(nbands, ngpoints), 'gvecs': array(ngpoints, 3)}}
     """
     # Call the original function to get PAW-corrected data
     gvecs, ngpoints, wfc_data = get_wfcn_data_from_vasp_pawpy(
-        wavecar_file, potcar_file, vasprun_file, max_band_fill
+        wavecar_file, potcar_file, vasprun_file, max_band_fill,
+        momentum_encut=momentum_encut
     )
 
     nkpts = len(kpoint_list)
@@ -157,7 +219,8 @@ def get_band_filling_from_outcar(outcar, spin_pol, occ_tol=1e-6):
         fill = np.sum(occ[0] > occ_tol)
         return int(fill)
 
-def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR, pol_directory, np_directory):
+def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
+                pol_directory, np_directory, momentum_encut=MOMENTUM_ENCUT):
    
     
      
@@ -165,8 +228,15 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR, pol_dire
     np_struct = Structure.from_file(np_POSCAR)
     utils.check_species_match(pol_struct, np_struct)
 
-    pol_wavecar = Wavecar(pol_WAVECAR, vasp_type="std")
-    np_wavecar = Wavecar(np_WAVECAR, vasp_type="std")
+    # vasp_type is left for pymatgen to detect from the plane-wave count,
+    # rather than asserted to be "std". Asserting it does not make it true:
+    # see utils.check_wavecar_type for what a pinned "std" does to a
+    # noncollinear WAVECAR.
+    pol_wavecar = Wavecar(pol_WAVECAR)
+    np_wavecar = Wavecar(np_WAVECAR)
+
+    utils.check_wavecar_type(pol_wavecar.vasp_type, "polar")
+    utils.check_wavecar_type(np_wavecar.vasp_type, "non-polar")
 
     potcar = Potcar.from_file(POTCAR)
     zval_dict = zval_dict_from_potcar(potcar)
@@ -229,8 +299,12 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR, pol_dire
         pol_band_fill = get_band_filling_from_wavecar_nospin(pol_wavecar, TOL)
         np_band_fill = get_band_filling_from_wavecar_nospin(np_wavecar, TOL)    
     
-    pol_wfcn_dict_pawpy = wfcn_dict_from_pawpy(pol_WAVECAR, POTCAR, pol_vasprun, pol_band_fill, kpoint_list)
-    np_wfcn_dict_pawpy = wfcn_dict_from_pawpy(np_WAVECAR, POTCAR, np_vasprun, np_band_fill, kpoint_list)
+    pol_wfcn_dict_pawpy = wfcn_dict_from_pawpy(pol_WAVECAR, POTCAR, pol_vasprun,
+                                               pol_band_fill, kpoint_list,
+                                               momentum_encut=momentum_encut)
+    np_wfcn_dict_pawpy = wfcn_dict_from_pawpy(np_WAVECAR, POTCAR, np_vasprun,
+                                              np_band_fill, kpoint_list,
+                                              momentum_encut=momentum_encut)
 
     vasp_parse_dict = utils.empty_parse_dict()
     vasp_parse_dict['pol_struct'] = pol_struct

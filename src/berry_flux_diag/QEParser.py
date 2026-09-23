@@ -30,13 +30,46 @@ def get_struct_from_qeschema(xml_data):
 
 
 def get_spin_pol_from_qeschema(xml_data):
-    '''returns False if calc is non-spin polarized
-    returns True if calc is spin-polarized'''
-    spin_data = xml_data['qes:espresso']['input']['spin'] 
-    lsda_bool = spin_data['lsda']
-    noncolin_bool = spin_data['noncolin']
-    spinorbit_bool = spin_data['spinorbit'] 
-    return lsda_bool or noncolin_bool or spinorbit_bool
+    """Whether the run is collinear spin-polarized (LSDA).
+
+    Returns
+    -------
+    bool
+        True for an LSDA run with two collinear spin channels, False for a
+        run with none.
+
+    Raises
+    ------
+    NotImplementedError
+        If the run is noncollinear or includes spin-orbit coupling.
+
+    Notes
+    -----
+    These three QE flags used to be OR-ed together into a single "is this
+    spin-polarized" answer, which sent a noncollinear run down the collinear
+    two-channel path. That path reads nbnd_up and nbnd_dw from the band
+    structure and opens wfcup*.hdf5 and wfcdw*.hdf5, none of which a
+    noncollinear run writes, so it failed somewhere downstream with a
+    KeyError or a missing file rather than saying what was wrong.
+
+    Supporting it is not a matter of routing: a noncollinear run stores a
+    two-component spinor per plane wave, and the overlap between two states
+    has to be summed over those components. Everything downstream here
+    assumes a scalar wavefunction.
+    """
+    spin_data = xml_data['qes:espresso']['input']['spin']
+
+    if spin_data['noncolin'] or spin_data['spinorbit']:
+        raise NotImplementedError(
+            f"this is a noncollinear calculation (noncolin="
+            f"{spin_data['noncolin']}, spinorbit={spin_data['spinorbit']}), "
+            f"which berry_flux_diag does not support: its wavefunctions are "
+            f"two-component spinors, and the overlaps computed here assume a "
+            f"scalar wavefunction. Use a collinear calculation - noncolin "
+            f"= .false. and lspinorb = .false. - or nothing below is valid."
+        )
+
+    return spin_data['lsda']
 
 
 def get_kpt_list_from_qeschema(xml_data):

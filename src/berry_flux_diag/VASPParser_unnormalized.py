@@ -148,6 +148,9 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR):
     pol_wavecar = Wavecar(pol_WAVECAR)
     np_wavecar = Wavecar(np_WAVECAR)
 
+    utils.check_wavecar_type(pol_wavecar.vasp_type, "polar")
+    utils.check_wavecar_type(np_wavecar.vasp_type, "non-polar")
+
     potcar = Potcar.from_file(POTCAR)
     zval_dict = zval_dict_from_potcar(potcar)
 
