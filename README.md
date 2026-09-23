@@ -75,7 +75,7 @@ cd berry-flux-diag
 
 ### ⚙️ Installation Options
 
-BerryFluxDiag offers four optional installation modes:
+berry-flux-diag offers four optional installation modes:
 
 1. Quantum ESPRESSO — [QE]
     
