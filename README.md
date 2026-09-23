@@ -79,12 +79,12 @@ BerryFluxDiag offers four optional installation modes:
 
 1. Quantum ESPRESSO — [QE]
     
-depedencies:
+dependencies:
 - `qeschema`
 - `h5py`
 
     ```bash
-    pip install .[QE]
+    pip install '.[QE]'
     ```
 
 2. VASP — [VASP]
@@ -93,7 +93,7 @@ dependencies:
 - `pawpyseed` (note: this requires the Intel Math Kernel Library (MKL), which is widely available on most computing clusters but is not necessarily available on Macs — see [Running the VASP workflow without pawpyseed](#running-the-vasp-workflow-without-pawpyseed))
 
     ```bash
-    pip install .[VASP]
+    pip install '.[VASP]'
     ```
 
 3. VASP with atomate2 jobflows — [VASP\_atomate2]
@@ -105,12 +105,12 @@ dependencies:
 - `monty`
 
     ```bash
-    pip install .[VASP_atomate2]
+    pip install '.[VASP_atomate2]'
     ```
 
 4. All supported workflows — [all]
    ```bash
-    pip install .
+    pip install '.[all]'
     ```
 
 ---

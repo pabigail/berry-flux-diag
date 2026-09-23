@@ -1,16 +1,55 @@
+[build-system]
+# Without this table, pip falls back to a legacy setuptools build that guesses
+# at everything below. setuptools 77 is the floor for PEP 639 (`license` as an
+# SPDX string plus `license-files`), which is what this file uses; pip builds in
+# an isolated environment by default, so this pin is what supplies it rather
+# than whatever setuptools happens to be installed.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "berry_flux_diag"
 version = "0.1.0"
 description = "Berry flux diagonalization"
 authors = [{ name = "Abigail N. Poteshman" }]
-requires-python = ">=3.9"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 readme = "README.md"
+
+# The floor the base dependencies actually impose: numpy 2.2 and pymatgen 2025
+# both require >=3.10. The atomate2 extra needs 3.11, but that is atomate2's own
+# constraint to enforce - declaring it here would turn away a Quantum ESPRESSO
+# user on 3.10 over a package they never install.
+requires-python = ">=3.10"
+
+keywords = [
+    "ferroelectrics",
+    "polarization",
+    "berry phase",
+    "DFT",
+    "VASP",
+    "Quantum ESPRESSO",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 
 # Base dependencies (common to everything)
 dependencies = [
     "numpy>=1.22",
     "pymatgen>=2024.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/pabigail/berry-flux-diag"
 
 [project.optional-dependencies]
 
@@ -22,7 +61,7 @@ QE = [
 
 # --- VASP extras ---
 VASP = [
-    "pawpyseed",      
+    "pawpyseed",
 ]
 
 # --- Atomate2 VASP workflow extras ---
@@ -33,12 +72,17 @@ VASP_atomate2 = [
     "monty",
 ]
 
-# --- Install everything (QE + VASP + VASP-atomate2) ---
-all = [
-    "qeschema",
-    "h5py",
-    "pawpyseed",
-    "jobflow",
-    "atomate2",
-    "monty",
+# --- Running the test suite ---
+test = [
+    "pytest>=7",
 ]
+
+# --- Install everything (QE + VASP + VASP-atomate2) ---
+# Written as a self-reference rather than a fourth hand-copied list, so adding a
+# dependency above cannot leave this one silently behind.
+all = [
+    "berry_flux_diag[QE,VASP,VASP_atomate2]",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
