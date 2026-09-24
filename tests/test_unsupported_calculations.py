@@ -9,7 +9,6 @@ detected. Neither produced an error at the point the assumption broke.
 from __future__ import annotations
 
 import ast
-import inspect
 from pathlib import Path
 
 import pytest

@@ -2,7 +2,7 @@ import logging
 
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp import Vasprun
-from pymatgen.io.vasp.outputs import Wavecar, Kpoints, Potcar, Outcar # clean later
+from pymatgen.io.vasp.outputs import Wavecar, Potcar
 from pymatgen.analysis.ferroelectricity.polarization import zval_dict_from_potcar
 from pawpyseed.core.wavefunction import Wavefunction, CoreRegion
 from pawpyseed.core.momentum import MomentumMatrix
@@ -246,8 +246,6 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
     
     pol_vasprun = Path(pol_directory) / 'vasprun.xml'
     np_vasprun = Path(np_directory) / 'vasprun.xml'
-
-    # pol_wfcn_pawpy = get_wfcn_dict_from_vasp_pawpy(pol_WAVECAR, POTCAR,  pol_vasprun)
 
     # determine whether spin-polarized from shape of coefficient array
     if len(np.shape(np.array(pol_wavecar.coeffs, dtype=object))) == 3:

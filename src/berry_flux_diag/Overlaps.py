@@ -50,8 +50,6 @@ class Overlaps:
         self.pol_wfcn_dict = parse_dict['pol_wfcn_dict']
         self.np_wfcn_dict = parse_dict['np_wfcn_dict']
         self.kpoint_list = parse_dict['kpoint_list']
-#         self.band_fill = np.min([parse_dict['pol_band_fill'], 
-#                                  parse_dict['np_band_fill']]) # changed this from np.max to np.min
         self.zval_dict = parse_dict['zval_dict']
         self.eig_thresh = eig_thresh
         self.sing_val_thresh = sing_val_thresh

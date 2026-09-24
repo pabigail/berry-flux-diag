@@ -116,17 +116,15 @@ def map_coeffs(coeffs0, gvecs0, kpt0, coeffs1, gvecs1, kpt1):
     max_g_rad = np.max([np.max(gvec_max0), np.max(gvec_max1)])
     min_g_rad = np.abs(np.min([np.min(gvec_min0), np.min(gvec_min1)]))
     max_rad = int(np.max([max_g_rad, min_g_rad]))
-    # base = int(np.max([gvec_base_exp0, gvec_base_exp1]))
+    # Every shifted component lands in [0, 2*max_rad], so this base makes
+    # gvec_to_index's x*base**2 + y*base + z encoding collision-free.
     base = (2*max_rad + 1)
     
     coeffs0_mapped = np.zeros((len(coeffs0), base**3 + base**2 + base + 1), dtype=complex)
     coeffs1_mapped = np.zeros((len(coeffs1), base**3 + base**2 + base + 1), dtype=complex)
-    
-    # print(f'coeffs_0 len: {len(coeffs0_mapped[0])}, coeffs_1 len: {len(coeffs1_mapped[0])}, gvec0: {gvec_len0}, gvec1: {gvec_len1}')
-    
+
     for i in range(gvec_len0):
         mapped_i = gvec_to_index(gvecs0[i], kpt0, max_rad, base)
-        # print(mapped_i, i)
         coeffs0_mapped[:, mapped_i] = coeffs0[:, i]
     for i in range(gvec_len1):
         mapped_i = gvec_to_index(gvecs1[i], kpt1, max_rad, base)

@@ -12,8 +12,6 @@ from __future__ import annotations
 import logging
 from unittest.mock import patch
 
-import pytest
-
 import berry_flux_diag as bfd
 
 

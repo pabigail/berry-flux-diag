@@ -6,14 +6,11 @@ import numpy as np
 import os
 from monty.serialization import dumpfn
 from pymatgen.core import Structure
-from pymatgen.io.vasp.sets import MPStaticSet
 from pymatgen.io.vasp.inputs import Kpoints
 from atomate2.vasp.jobs.core import StaticMaker
-from atomate2.vasp.jobs.base import BaseVaspMaker
 from atomate2.vasp.sets.core import StaticSetGenerator
 from atomate2.vasp.powerups import update_user_incar_settings, update_user_kpoints_settings
 from typing import List
-from dataclasses import field
 from pathlib import Path
 import gzip
 import shutil

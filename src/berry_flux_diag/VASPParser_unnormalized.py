@@ -59,7 +59,7 @@ module. Until then it stays, and it stays documented.
 import logging
 
 from pymatgen.core.structure import Structure
-from pymatgen.io.vasp.outputs import Wavecar, Kpoints, Potcar
+from pymatgen.io.vasp.outputs import Wavecar, Potcar
 from pymatgen.analysis.ferroelectricity.polarization import zval_dict_from_potcar
 import numpy as np
 import berry_flux_diag.utils as utils

@@ -1,11 +1,8 @@
-#!/bin/bash/python
-
 import logging
 from itertools import product
 import numpy as np
 from pymatgen.core import Structure, Lattice
 from pymatgen.io.vasp import Poscar
-import re
 import os
 
 import berry_flux_diag.utils as utils
