@@ -10,7 +10,7 @@ import berry_flux_diag.utils as utils
 logger = logging.getLogger(__name__)
 
 def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
-                       num_interps = 'auto', MAX_DISP=0.3):
+                       num_interps = 'auto', max_disp=0.3):
     """Translate, then interpolate, the pair of reference structures.
 
     Returns a dict with both displacements: ``orig_max_disp`` between the
@@ -50,11 +50,11 @@ def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
 
     # compute number of interpolated structures to ensure max atomic distance is below max_disp in num_interps is not specified
     if num_interps == 'auto':
-        num_interps = int(np.ceil(trans_max_disp/MAX_DISP))
+        num_interps = int(np.ceil(trans_max_disp/max_disp))
     elif not isinstance(num_interps, int) or num_interps < 0:
         raise TypeError("num_interps must be a non-negative integer or the string 'auto'")
 
-    if trans_max_disp > MAX_DISP:
+    if trans_max_disp > max_disp:
         structs = pol_orig_struct.interpolate(np_trans_struct, num_interps, interpolate_lattices=True)
     else:
         structs = [pol_orig_struct, np_trans_struct]
@@ -74,12 +74,12 @@ def preprocess_structs(pol_orig_struct, np_orig_struct, translate=True,
 
 
 def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True,
-                       num_interps='auto', MAX_DISP=0.3):
+                       num_interps='auto', max_disp=0.3):
     """preprocess_structs, reading the two structures from POSCAR files."""
     return preprocess_structs(Structure.from_file(pol_orig_POSCAR_file),
                               Structure.from_file(np_orig_POSCAR_file),
                               translate=translate, num_interps=num_interps,
-                              MAX_DISP=MAX_DISP)
+                              max_disp=max_disp)
 
 
 def get_refined_oshift(st_a,st_b,grid_range=0.1):
@@ -165,13 +165,10 @@ def write_qe_in_scf_files(file_path, structs, material, pseudo_dir,
         poscar_to_qe_io_scf_nomag(struct, material, tag, sym,
                                   pseudo_dir, kpoints_grid, kshift, species_dict, file_path)
 
-    return 0
-
 def poscar_to_qe_io_scf_nomag(structure, material, tag, sym,
                           pseudo_dir, kpoints_grid, kshift, species_dict, out_path):
     '''
-    file_path: file where poscar is located and where QE.in file will be written to
-    poscar_file: name of poscar file
+    structure: pymatgen Structure to write
     material: name of material in string form, ex "BaTiO3"
     tag: for naming prefix and QE input file ex "np_orig" or "trans_1" or "interp_1"
     sym: boolean (true or false)
@@ -277,8 +274,6 @@ def poscar_to_qe_io_scf_nomag(structure, material, tag, sym,
         f.write("CELL_PARAMETERS angstrom\n")
         for vec in structure.lattice.matrix:
             f.write(f"  {vec[0]:.6f} {vec[1]:.6f} {vec[2]:.6f}\n")
-        
-    return 0
 
 
 
@@ -403,7 +398,10 @@ def write_qe_input(control_dict, system_dict, electron_dict, species_dict, kpoin
             if isinstance(value, bool):
                 value_str = '.TRUE.' if value else '.FALSE.'
             else:
-                value_str = f"{value}" if isinstance(value, str) and key != "tot_magnetization" else f"{value}"
+                # Not quoted, unlike CONTROL: parse_qe_input strips quotes
+                # from CONTROL values but leaves them on SYSTEM values, so
+                # re-quoting here would double them.
+                value_str = f"{value}"
             f.write(f"  {key} = {value_str}\n")
         f.write("/\n")
 
@@ -473,7 +471,6 @@ def generate_qe_in_from_qe_in(orig_pol_qe_in_filename, orig_np_qe_in_filename,
                np_input_dict['hubbard'],
                np_struct_trans,
                bfd_np_qe_in_filename)
-    return 0
 
 
 def write_vasp_in_poscar_files(save_path, structs, material):

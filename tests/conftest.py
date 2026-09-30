@@ -14,7 +14,8 @@ REPO = Path(__file__).resolve().parent.parent
 # Run against the working tree without requiring an editable install.
 sys.path.insert(0, str(REPO / "src"))
 
-QE_DIR = REPO / "tests" / "BaTiO3_QE_IO_nospin"
+# The QE input directory lives in capture_reference.py, which is the only
+# thing that reads it.
 REFERENCE_DIR = REPO / "tests" / "reference"
 
 # VASP references need WAVECAR and POTCAR files, which are too large and (for

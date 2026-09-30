@@ -60,7 +60,7 @@ class BFDMaker(Maker):
         # Call your jobs in sequence
         pre_process = preprocess_POSCARS(str(pol_poscar), str(np_poscar))
         scf_jobs = scf_with_fixed_kpoints(pre_process.output["structs"])
-        string_sum_jobs = make_string_sum_jobs(scf_jobs.output.vasp_dirs)
+        string_sum_jobs = make_string_sum_jobs(scf_jobs.output["vasp_dirs"])
         calc_pol_job = calc_polarization_no_spin(
             pre_process.output, string_sum_jobs.output["string_sum_outputs"]
         )

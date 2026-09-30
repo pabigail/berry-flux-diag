@@ -81,12 +81,16 @@ def check_gvecs_same(gvecs0, gvecs1):
 
 def gvec_extrema(gvecs):
     # code adapted from Stephen Gant WF_unfold.py
+    #
+    # This used to also return gvec_range and a gvec_base_exp of
+    # max(gvec_range) + 1. Neither was ever read, and the second was a
+    # trap: it is the right base only for an encoding shifted by -min,
+    # whereas gvec_to_index shifts by +max_rad, so adopting it would have
+    # produced index collisions rather than an error.
     gvec_min = np.min(gvecs, axis=0)
     gvec_max = np.max(gvecs, axis=0)
-    gvec_range = gvec_max - gvec_min
     gvec_len = len(gvecs)
-    gvec_base_exp = np.max(gvec_range) + 1
-    return gvec_min, gvec_max, gvec_range, gvec_len, gvec_base_exp
+    return gvec_min, gvec_max, gvec_len
 
 
 def gvec_to_index(gvec, kpt, max_rad, base):
@@ -110,8 +114,8 @@ def gvec_to_index(gvec, kpt, max_rad, base):
 
 def map_coeffs(coeffs0, gvecs0, kpt0, coeffs1, gvecs1, kpt1):
     
-    gvec_min0, gvec_max0, gvec_range0, gvec_len0, gvec_base_exp0 = gvec_extrema(gvecs0)
-    gvec_min1, gvec_max1, gvec_range1, gvec_len1, gvec_base_exp1 = gvec_extrema(gvecs1)
+    gvec_min0, gvec_max0, gvec_len0 = gvec_extrema(gvecs0)
+    gvec_min1, gvec_max1, gvec_len1 = gvec_extrema(gvecs1)
     
     max_g_rad = np.max([np.max(gvec_max0), np.max(gvec_max1)])
     min_g_rad = np.abs(np.min([np.min(gvec_min0), np.min(gvec_min1)]))

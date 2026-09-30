@@ -170,11 +170,13 @@ class Overlaps:
     # get unitary along path
     def get_unitary_along_path(self, loop_path, direction):
         path_pairs = zip(loop_path[:-1], loop_path[1:])
-        curly_U = np.identity(self.band_fill)
+        # Complex from the start: every curly_M is complex, so a real
+        # identity is upcast on the first dot anyway.
+        curly_U = np.identity(self.band_fill, dtype=complex)
         
         # save for debugging
         dict_svd = {}
-        dict_svd['M'] = []
+        dict_svd['curly_M'] = []
         dict_svd['states'] = []
         dict_svd['s'] = []
         dict_svd['U'] = []
@@ -189,7 +191,7 @@ class Overlaps:
             curly_U = np.dot(curly_U, curly_M)
             
             # save for debugging
-            dict_svd['M'].append(curly_M)
+            dict_svd['curly_M'].append(curly_M)
             dict_svd['states'].append(states)
             dict_svd['s'].append(s)
             dict_svd['U'].append(curly_U)
@@ -232,7 +234,11 @@ class Overlaps:
                                  (0, kpt1), 
                                  (0, kpt0)]
                     curly_U, dict_svd = self.get_unitary_along_path(loop_path, direction)
-                    wlevs = np.log(np.linalg.eigvals(curly_U)).imag
+                    # np.angle is the imaginary part of np.log for a nonzero
+                    # argument, without computing the log magnitude that was
+                    # then thrown away. Eigenvalues of a unitary matrix have
+                    # modulus 1, so the zero case cannot arise.
+                    wlevs = np.angle(np.linalg.eigvals(curly_U))
                     self.check_wilson_loop_phases(wlevs)
                     inner_loop_sum += sum(wlevs) / (2 * np.pi)
                     

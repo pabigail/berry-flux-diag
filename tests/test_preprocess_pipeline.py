@@ -65,9 +65,9 @@ def test_translation_is_measured_as_well_as_applied():
 
 
 def test_no_images_are_inserted_for_a_pure_translation():
-    """The bug: 0.3 Angstrom against MAX_DISP=0.1 asked for three images,
+    """The bug: 0.3 Angstrom against max_disp=0.1 asked for three images,
     although the translation had already removed the whole displacement."""
-    out = preprocess.preprocess_structs(cell(), cell(0.05), MAX_DISP=0.1)
+    out = preprocess.preprocess_structs(cell(), cell(0.05), max_disp=0.1)
     assert len(out["structs"]) == 2
 
 
@@ -77,7 +77,7 @@ def test_the_old_untranslated_count_would_have_been_larger():
     Each surplus image is a full SCF run, so the difference here between
     three-or-more images and none is the whole point of the fix.
     """
-    out = preprocess.preprocess_structs(cell(), cell(0.05), MAX_DISP=0.1)
+    out = preprocess.preprocess_structs(cell(), cell(0.05), max_disp=0.1)
     # What the old rule would have asked for, from the untranslated number.
     assert int(np.ceil(out["orig_max_disp"] / 0.1)) >= 3
     # What the translated number asks for: nothing, so no interpolation runs.
@@ -90,7 +90,7 @@ def test_images_are_still_inserted_when_translation_cannot_help():
     pol = cell()
     far = Structure(Lattice.cubic(6.0), SPECIES,
                     [[0.0, 0.0, 0.0], [0.6, 0.5, 0.5], [0.5, 0.5, 0.0]])
-    out = preprocess.preprocess_structs(pol, far, MAX_DISP=0.1)
+    out = preprocess.preprocess_structs(pol, far, max_disp=0.1)
     assert out["trans_max_disp"] > 0.1
     assert len(out["structs"]) > 2
 
@@ -100,7 +100,7 @@ def test_adjacent_displacement_respects_the_limit():
     pol = cell()
     far = Structure(Lattice.cubic(6.0), SPECIES,
                     [[0.0, 0.0, 0.0], [0.8, 0.5, 0.5], [0.5, 0.5, 0.0]])
-    out = preprocess.preprocess_structs(pol, far, MAX_DISP=0.3)
+    out = preprocess.preprocess_structs(pol, far, max_disp=0.3)
     assert out["adj_max_disp"] <= 0.3 + 1e-9
 
 

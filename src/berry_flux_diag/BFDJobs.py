@@ -164,7 +164,7 @@ def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True
                                          np_orig_POSCAR_file,
                                          translate=translate,
                                          num_interps=num_interps,
-                                         MAX_DISP=max_disp)
+                                         max_disp=max_disp)
 
 
 @job
@@ -292,7 +292,7 @@ def make_string_sum_jobs(vasp_dirs: List[str]) -> Response:
         pol_dir = vasp_dirs[i]
         np_dir = vasp_dirs[i+1]
         job_i = get_string_sums_from_VASP(pol_dir, np_dir)
-        job_i.append_name(f"string_sum_{i}")
+        job_i.append_name(f"_string_sum_{i}")
         jobs.append(job_i)
 
     return Response(replace=Flow(jobs), output={"string_sum_outputs": [j.output for j in jobs]})
