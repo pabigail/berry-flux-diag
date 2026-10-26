@@ -82,7 +82,6 @@ def test_batio3_qe_nospin(qe_reference):
     assert_matches_reference(capture_qe(), qe_reference)
 
 
-@pytest.mark.skipif(bfd.VASPParser is None, reason="VASPParser needs pawpyseed")
 def test_batio3_vasp_nospin(vasp_reference, vasp_run_dirs):
     """VASP path, using run directories named by the environment."""
     pol_dir, np_dir = vasp_run_dirs
@@ -90,14 +89,12 @@ def test_batio3_vasp_nospin(vasp_reference, vasp_run_dirs):
 
 
 def test_batio3_vasp_unnormalized_nospin(vasp_unnormalized_reference, vasp_run_dirs):
-    """VASP path without pawpyseed, which runs anywhere pymatgen does.
+    """VASP path without the PAW reconstruction.
 
     The polarization pinned here is not physical - the PAW augmentation
-    terms are missing - so it must never be compared against the pawpyseed
-    reference or quoted anywhere. It is pinned because it is deterministic,
-    and because this is the only VASP coverage available on a machine that
-    cannot build pawpyseed: it exercises the WAVECAR read, the k-point
-    handling, the string construction and the whole Overlaps path.
+    terms are missing - so it must never be compared against the VASP
+    reference or quoted anywhere. It is pinned because it is deterministic.
+    It dates from when this was the only VASP path that ran without MKL.
 
     Slower than the QE case - about two minutes on a 6x6x6 mesh - because
     it walks 3*N^3 plaquettes through the un-vectorized overlap loop. That

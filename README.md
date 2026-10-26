@@ -88,9 +88,11 @@ dependencies:
     ```
 
 2. VASP — [VASP]
-    
-dependencies:
-- `pawpyseed` (note: this requires the Intel Math Kernel Library (MKL), which is widely available on most computing clusters but is not necessarily available on Macs — see [Running the VASP workflow without pawpyseed](#running-the-vasp-workflow-without-pawpyseed))
+
+No dependencies beyond the base install (`numpy`, `pymatgen`). The PAW
+reconstruction `VASPParser` needs is done in NumPy by `berry_flux_diag.paw`,
+so it runs anywhere, including Apple Silicon Macs. The extra is kept,
+empty, so that existing install commands still work.
 
     ```bash
     pip install '.[VASP]'
@@ -99,7 +101,6 @@ dependencies:
 3. VASP with atomate2 jobflows — [VASP\_atomate2]
     
 dependencies:
-- `pawpyseed` (see above note)
 - `atomate2`
 - `jobflow`
 - `monty`
@@ -115,55 +116,33 @@ dependencies:
 
 ---
 
-## Running the VASP workflow without pawpyseed
+## PAW reconstruction for VASP
 
-`pawpyseed` requires the Intel MKL and therefore does not build on machines
-without it, including Apple Silicon Macs. For development on such a machine
-there is a parallel module, `VASPParser_unnormalized`, that reads a WAVECAR
-with pymatgen alone and needs no pawpyseed:
+A WAVECAR holds pseudo-wavefunctions, which are orthonormal only under the
+PAW overlap operator. `VASPParser` adds back the augmentation contribution
+inside each PAW sphere before the overlaps are taken. This used to be done
+by `pawpyseed`, which needs the Intel MKL and has not been maintained since
+2021. It is now done by `berry_flux_diag.paw`, a NumPy port of exactly the
+part of pawpyseed that was used.
 
-```python
-from berry_flux_diag import VASPParser_unnormalized as vasp_unnorm
-
-parse_dict = vasp_unnorm.vasp_parser(pol_POSCAR, np_POSCAR,
-                                     pol_WAVECAR, np_WAVECAR, POTCAR)
-```
-
-> [!WARNING]
-> **The polarization it produces is not physically correct.** A WAVECAR
-> holds pseudo-wavefunctions, which are orthonormal only under the PAW
-> overlap operator. Reconstructing the missing augmentation contribution
-> inside each PAW sphere is precisely what pawpyseed does for
-> `VASPParser`. Without it the overlap matrices are not unitary and the
-> Berry phases are wrong. Do not quote, plot or publish a number from
-> this module.
-
-Only the electronic term is affected — the ionic term comes from ZVAL and
-site positions, so it is unchanged. For the BaTiO₃ case in `tests/`
-(6×6×6 mesh, VASP PAW potentials):
+The port was checked against pawpyseed's own C code. On the BaTiO₃ case in
+`tests/` (6×6×6 mesh, 20 occupied bands) every reconstructed coefficient
+agrees to 1.4×10⁻¹⁴ relative, and the polarization is unchanged:
 
 | | electronic | ionic | total |
 |---|---|---|---|
-| `VASPParser` (pawpyseed) | 17.18 | 28.65 | 45.84 |
+| `VASPParser` | 17.18 | 28.65 | 45.84 |
 | `VASPParser_unnormalized` | 16.13 | 28.65 | 44.78 |
 | | **−6.1%** | — | −2.3% |
 
-The 2.3% on the total is flattering: it is diluted by an ionic term that
-was never in question. The error lives entirely in the 6%, and it is an
-uncontrolled, species-dependent artifact rather than a bounded
-approximation — there is no reason to expect a comparable size for a
-different material.
+It is also about 19× faster: roughly 6 s per WAVECAR against pawpyseed's
+115 s for that case.
 
-What the module *is* good for is exercising everything around the
-overlaps: preprocessing, string construction, the diagonalization
-machinery, and the jobflow plumbing. For a correct VASP result, use
-`VASPParser` on a machine with MKL.
+### Regression tests
 
-It is regression-tested on exactly that basis. `tests/reference/` pins the
-number it produces for BaTiO₃ — not because the number is right, but
-because it is deterministic, which makes it the only VASP coverage
-available without MKL. WAVECAR files are too large to commit, so point the
-test at a pair of run directories:
+`tests/reference/` pins the BaTiO₃ numbers for both VASP paths. WAVECAR
+files are too large to commit, so point the tests at a pair of run
+directories:
 
 ```bash
 export BFD_VASP_BATIO3_POL=/path/to/polar/run
@@ -172,20 +151,27 @@ pytest tests/test_regression_batio3.py
 ```
 
 Without those variables the VASP tests skip and the QE test still runs.
-To regenerate the fixture deliberately — never to make a red test pass:
+To regenerate a fixture deliberately — never to make a red test pass:
 
 ```bash
-python tests/capture_reference.py vasp-unnormalized \
+python tests/capture_reference.py vasp \
     --pol-dir "$BFD_VASP_BATIO3_POL" --np-dir "$BFD_VASP_BATIO3_NP"
 ```
 
-Note that it is not imported by `berry_flux_diag/__init__.py` and must be
-named explicitly, so that these numbers cannot be reached by accident when
-pawpyseed is merely missing. Its `vasp_parser` also takes five arguments
-rather than the seven `VASPParser.vasp_parser` takes — the two run
-directories are only needed by pawpyseed — so the two are not drop-in
-replacements, by design.
+### `VASPParser_unnormalized`
 
-This split exists only because of pawpyseed's MKL requirement and its lack
-of maintenance since 2021. Replacing pawpyseed with a maintainable PAW
-overlap implementation would remove the need for this module.
+A parallel module that skips the PAW reconstruction and reads the WAVECAR
+with pymatgen alone. It was the only VASP path that ran without MKL, and is
+now redundant.
+
+> [!WARNING]
+> **The polarization it produces is not physically correct.** Without the
+> augmentation terms the overlap matrices are not unitary and the Berry
+> phases are wrong — by 6% in the electronic term above, and by an
+> uncontrolled, species-dependent amount in general. Do not quote, plot or
+> publish a number from it.
+
+It is not imported by `berry_flux_diag/__init__.py` and must be named
+explicitly (`from berry_flux_diag import VASPParser_unnormalized`). Its
+fixture is regenerated with `capture_reference.py vasp-unnormalized`. It is
+a candidate for deletion.

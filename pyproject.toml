@@ -60,13 +60,13 @@ QE = [
 ]
 
 # --- VASP extras ---
-VASP = [
-    "pawpyseed",
-]
+# Empty: the PAW reconstruction VASPParser needs is in berry_flux_diag.paw,
+# which uses numpy alone. Kept so that existing `pip install '.[VASP]'`
+# commands still work.
+VASP = []
 
 # --- Atomate2 VASP workflow extras ---
 VASP_atomate2 = [
-    "pawpyseed",
     "jobflow",
     "atomate2",
     "monty",

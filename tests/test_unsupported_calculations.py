@@ -106,8 +106,8 @@ def test_pymatgen_only_checks_the_first_letter_and_so_do_we():
 
 # --- VASP: the momentum grid cutoff ---------------------------------------
 #
-# VASPParser imports pawpyseed, which needs MKL and does not build on arm64
-# macOS, so these read the source rather than the module.
+# These read the source rather than the module, so that what is checked is
+# the signatures as written.
 
 def vasp_parser_ast():
     return ast.parse((SRC / "VASPParser.py").read_text())
@@ -123,8 +123,8 @@ def function_def(tree, name):
 def test_the_pinned_cutoff_is_defined_once():
     """1000 eV is held deliberately, pending a reference to move it against.
 
-    It lives in one named constant so that switching to pawpyseed's
-    4 x ENCUT later is a one-line change, not a hunt for literals.
+    It lives in one named constant so that switching to the
+    4 x ENCUT default later is a one-line change, not a hunt for literals.
     """
     tree = vasp_parser_ast()
     assignments = [n for n in tree.body
@@ -135,8 +135,8 @@ def test_the_pinned_cutoff_is_defined_once():
     assert assignments[0].value.value == 1000
 
 
-@pytest.mark.parametrize("name", ["get_wfcn_data_from_vasp_pawpy",
-                                  "wfcn_dict_from_pawpy",
+@pytest.mark.parametrize("name", ["get_paw_wfcn_data",
+                                  "paw_wfcn_dict",
                                   "vasp_parser"])
 def test_the_cutoff_default_is_the_named_constant(name):
     """No function may carry its own copy of the number."""
@@ -164,7 +164,7 @@ def test_no_function_still_takes_a_hardcoded_cutoff():
             f"{node.name} still takes cutoff={ast.unparse(cutoff)}")
 
 
-@pytest.mark.parametrize("name", ["wfcn_dict_from_pawpy", "vasp_parser"])
+@pytest.mark.parametrize("name", ["paw_wfcn_dict", "vasp_parser"])
 def test_the_cutoff_is_overridable_end_to_end(name):
     """It has to reach vasp_parser to be usable for a convergence check."""
     fn = function_def(vasp_parser_ast(), name)

@@ -16,9 +16,9 @@ not: WAVECAR files are hundreds of megabytes and POTCAR files are
 copyrighted, so pass their location on the command line or set
 BFD_VASP_BATIO3_POL / BFD_VASP_BATIO3_NP.
 
-The vasp-unnormalized mode captures the no-pawpyseed path. Its number is
-not a physical polarization, but it is deterministic, and unlike the vasp
-mode it can be captured and checked on a machine without MKL.
+The vasp-unnormalized mode captures VASPParser_unnormalized, which skips
+the PAW reconstruction. Its number is not a physical polarization, but it is
+deterministic.
 """
 
 from __future__ import annotations
@@ -43,11 +43,11 @@ import berry_flux_diag as bfd  # noqa: E402
 QE_DIR = REPO / "tests" / "BaTiO3_QE_IO_nospin"
 REFERENCE_DIR = REPO / "tests" / "reference"
 
-# Files pawpyseed and the VASP parser expect to find unzipped in a run directory.
-VASP_FILES = ("POSCAR", "CONTCAR", "WAVECAR", "POTCAR", "OUTCAR", "vasprun.xml")
+# Files the VASP parser reads from a run directory, unzipped.
+VASP_FILES = ("POSCAR", "WAVECAR", "POTCAR", "vasprun.xml")
 
 # The unnormalized parser reads the WAVECAR with pymatgen alone, so it needs
-# neither the run directory nor the files pawpyseed goes looking for.
+# no vasprun.xml.
 VASP_UNNORMALIZED_FILES = ("POSCAR", "WAVECAR", "POTCAR")
 
 
@@ -136,7 +136,7 @@ def stage_vasp_dir(src: Path, dest: Path, names=VASP_FILES) -> Path:
     """Copy the files the parsers need into dest, gunzipping as required.
 
     The source run directories are left untouched: they are research data,
-    not scratch space, and pawpyseed wants plain files beside each other.
+    not scratch space, and the parsers want plain files beside each other.
     """
     dest.mkdir(parents=True, exist_ok=True)
     for name in names:
@@ -152,12 +152,6 @@ def stage_vasp_dir(src: Path, dest: Path, names=VASP_FILES) -> Path:
 
 
 def capture_vasp(pol_src: Path, np_src: Path) -> dict:
-    if bfd.VASPParser is None:
-        raise SystemExit(
-            "berry_flux_diag.VASPParser did not import - pawpyseed is missing "
-            "from this environment, so the VASP reference cannot be captured here."
-        )
-
     with tempfile.TemporaryDirectory(prefix="bfd_vasp_ref_") as tmp:
         pol_dir = stage_vasp_dir(pol_src, Path(tmp) / "pol")
         np_dir = stage_vasp_dir(np_src, Path(tmp) / "np")
@@ -189,13 +183,11 @@ def capture_vasp(pol_src: Path, np_src: Path) -> dict:
 
 
 def capture_vasp_unnormalized(pol_src: Path, np_src: Path) -> dict:
-    """Reference for the no-pawpyseed VASP path.
+    """Reference for VASPParser_unnormalized.
 
     The polarization here is physically wrong - the PAW augmentation terms
     are missing - but it is deterministically wrong, which is all a
-    regression fixture needs. Its value is that it runs anywhere pymatgen
-    does, so the VASP string construction, k-point handling and parse
-    dictionary stay covered on machines that cannot build pawpyseed.
+    regression fixture needs.
     """
     from berry_flux_diag import VASPParser_unnormalized as vasp_unnorm
 
@@ -219,7 +211,7 @@ def capture_vasp_unnormalized(pol_src: Path, np_src: Path) -> dict:
             "system": "BaTiO3, non-spin-polarized",
             "warning": "NOT a physical polarization: the PAW augmentation "
                        "terms are missing. This fixture exists only to detect "
-                       "unintended changes in the no-pawpyseed code path.",
+                       "unintended changes in VASPParser_unnormalized.",
             "inputs": {
                 "pol_dir": str(pol_src),
                 "np_dir": str(np_src),

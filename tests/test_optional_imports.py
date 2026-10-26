@@ -25,14 +25,14 @@ def fails_with(missing):
 # --- a genuinely missing extra is benign ---------------------------------
 
 def test_a_missing_dependency_returns_none(caplog):
-    with fails_with("pawpyseed"), caplog.at_level(logging.DEBUG, "berry_flux_diag"):
-        assert bfd._import_optional("VASPParser") is None
+    with fails_with("qeschema"), caplog.at_level(logging.DEBUG, "berry_flux_diag"):
+        assert bfd._import_optional("QEParser") is None
 
 
 def test_a_missing_dependency_does_not_warn(caplog):
     """Not installing an extra is a choice, not a fault."""
-    with fails_with("pawpyseed"), caplog.at_level(logging.DEBUG, "berry_flux_diag"):
-        bfd._import_optional("VASPParser")
+    with fails_with("qeschema"), caplog.at_level(logging.DEBUG, "berry_flux_diag"):
+        bfd._import_optional("QEParser")
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
@@ -43,9 +43,9 @@ def test_a_missing_dependency_names_the_extra_that_installs_it(caplog):
 
 
 def test_a_submodule_of_a_dependency_counts_as_that_dependency(caplog):
-    with fails_with("pawpyseed.core.momentum"), \
+    with fails_with("atomate2.vasp.jobs"), \
             caplog.at_level(logging.DEBUG, "berry_flux_diag"):
-        bfd._import_optional("VASPParser")
+        bfd._import_optional("BFDJobs")
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
@@ -84,9 +84,9 @@ def test_a_near_miss_on_a_dependency_name_warns(caplog):
 # --- the reason is recorded either way -----------------------------------
 
 def test_the_reason_is_recorded(caplog):
-    with fails_with("pawpyseed"), caplog.at_level(logging.DEBUG, "berry_flux_diag"):
-        bfd._import_optional("VASPParser")
-    assert bfd.unavailable["VASPParser"] == "pawpyseed"
+    with fails_with("qeschema"), caplog.at_level(logging.DEBUG, "berry_flux_diag"):
+        bfd._import_optional("QEParser")
+    assert bfd.unavailable["QEParser"] == "qeschema"
 
 
 def test_every_optional_module_is_either_importable_or_explained():

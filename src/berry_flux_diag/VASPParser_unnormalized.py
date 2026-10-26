@@ -3,11 +3,9 @@
 WHAT THIS IS FOR
 ----------------
 This module is a deliberate parallel to VASPParser that reads a WAVECAR
-using pymatgen alone. It imports no pawpyseed, and so it is the only VASP
-path that runs on a machine without the Intel MKL - a Mac, most obviously.
-Use it to exercise the workflow end to end: preprocessing, string
-construction, the overlap and diagonalization machinery, the jobflow
-plumbing, and the shape of the parse dictionary.
+using pymatgen alone and skips the PAW reconstruction. It was written when
+VASPParser needed pawpyseed, and so the Intel MKL, and this was the only
+VASP path that ran on a Mac. That is no longer true: see STATUS.
 
 THE POLARIZATION IT PRODUCES IS NOT PHYSICALLY CORRECT
 ------------------------------------------------------
@@ -15,7 +13,8 @@ A WAVECAR stores pseudo-wavefunction coefficients. In the PAW formalism
 these are not the all-electron wavefunctions, and they are orthonormal
 only under the PAW overlap operator, not under the plain plane-wave inner
 product used here. Reconstructing the missing augmentation contribution
-inside each PAW sphere is exactly what pawpyseed does for VASPParser.
+inside each PAW sphere is exactly what berry_flux_diag.paw does for
+VASPParser.
 
 Without it the overlap matrices are not unitary and the Berry phases are
 wrong. Only the electronic term is affected; the ionic term comes from
@@ -23,7 +22,7 @@ ZVAL and site positions, so it is unchanged. For the BaTiO3 case in
 tests/ (6x6x6 mesh, VASP PAW potentials):
 
                       electronic    ionic      total
-    pawpyseed            17.18      28.65      45.84
+    VASPParser           17.18      28.65      45.84
     this module          16.13      28.65      44.78
                         -6.1%         --      -2.3%
 
@@ -33,27 +32,28 @@ that number is an uncontrolled, species-dependent artifact rather than a
 bounded approximation - it is not a constant offset, and there is no
 reason to expect a comparable size for a different material. Never quote,
 plot or publish a number from this module. For a correct VASP result use
-VASPParser on a machine with MKL.
+VASPParser.
 
 WHY IT IS NOT IMPORTED BY __init__.py
 --------------------------------------
 Reaching it requires naming it, so that no one gets these numbers by
-accident when pawpyseed happens to be missing:
+accident:
 
     from berry_flux_diag import VASPParser_unnormalized as vasp_unnorm
     parse_dict = vasp_unnorm.vasp_parser(pol_POSCAR, np_POSCAR,
                                          pol_WAVECAR, np_WAVECAR, POTCAR)
 
 Note the signature differs from VASPParser.vasp_parser, which also takes
-the two run directories that pawpyseed needs. The two are not drop-in
+the two run directories it reads vasprun.xml from. The two are not drop-in
 replacements for one another, which is intentional.
 
 STATUS
 ------
-Temporary. pawpyseed was last released in 2021 and its MKL requirement is
-what forces this split in the first place; replacing it with a
-maintainable PAW overlap implementation would remove the need for this
-module. Until then it stays, and it stays documented.
+Redundant. It existed because pawpyseed's MKL requirement kept
+VASPParser off machines without MKL. VASPParser now does the PAW
+reconstruction in NumPy (berry_flux_diag.paw), so it runs anywhere this
+module does. This module is kept only until its regression fixture is no
+longer wanted, and is a candidate for deletion.
 """
 
 import logging
@@ -135,7 +135,7 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR):
     """Build a parse dictionary from pseudo-wavefunctions alone.
 
     Takes five paths, where VASPParser.vasp_parser takes seven: the two run
-    directories are omitted because only pawpyseed needs them.
+    directories are omitted because only the PAW reconstruction needs them.
 
     The result drives the rest of the workflow unchanged, but the
     polarization computed from it is not physically correct - the PAW

@@ -38,6 +38,7 @@ from . import constants
 from . import preprocess
 from . import utils
 from . import Overlaps
+from . import VASPParser
 
 
 # --- Optional modules -----------------------------------------------------
@@ -55,7 +56,6 @@ from . import Overlaps
 #: the extra that installs them.
 _OPTIONAL_MODULES = {
     "QEParser": (("qeschema", "h5py"), "QE"),
-    "VASPParser": (("pawpyseed",), "VASP"),
     "BFDMaker": (("jobflow", "atomate2", "monty"), "VASP_atomate2"),
     "BFDJobs": (("jobflow", "atomate2", "monty"), "VASP_atomate2"),
 }
@@ -65,10 +65,10 @@ _OPTIONAL_MODULES = {
 #: optional module imported. Consult it when one of them is None:
 #:
 #:     >>> import berry_flux_diag as bfd
-#:     >>> bfd.VASPParser is None
+#:     >>> bfd.QEParser is None
 #:     True
 #:     >>> bfd.unavailable
-#:     {'VASPParser': 'pawpyseed'}
+#:     {'QEParser': 'qeschema'}
 unavailable = {}
 
 
@@ -106,15 +106,14 @@ def _import_optional(name):
 
 
 QEParser = _import_optional("QEParser")
-VASPParser = _import_optional("VASPParser")
 BFDMaker = _import_optional("BFDMaker")
 BFDJobs = _import_optional("BFDJobs")
 
-# VASPParser_unnormalized is deliberately absent from this list. It reads a
-# WAVECAR without pawpyseed, so it runs where MKL is unavailable, but it
-# omits the PAW augmentation terms and the polarization it produces is not
-# physically correct. Importing it here would let a user reach those numbers
-# by accident whenever pawpyseed is missing, so it must be named explicitly:
+# VASPParser_unnormalized is deliberately not imported here. It reads a
+# WAVECAR with pymatgen alone and omits the PAW augmentation terms, so the
+# polarization it produces is not physically correct. Importing it here would
+# make those numbers one attribute away from the real ones, so it must be
+# named explicitly:
 #
 #     from berry_flux_diag import VASPParser_unnormalized
 #
