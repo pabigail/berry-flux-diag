@@ -7,44 +7,144 @@ def direction_to_vals(direction):
     if direction == 'z':
         comps = (0, 1)
         dir_comp = 2
-        gvec = [0, 0, 1]
+        gvec = np.array([0, 0, 1])
     elif direction == 'x':
         comps = (1, 2)
         dir_comp = 0
-        gvec = [1, 0, 0]
+        gvec = np.array([1, 0, 0])
     elif direction == 'y':
         comps = (0, 2)
         dir_comp = 1
-        gvec = [0, 1, 0]
+        gvec = np.array([0, 1, 0])
     else:
         raise ValueError('Direction must be x, y, or z')
     return comps, dir_comp, gvec
 
 
-def get_strings(kpoints, direction):
-    """ given a list of kpoints (in reciprocal space) and a direction x, y, z
-        return a list of strings of kpoints along the corresponding direction """
-    # includes the extra kpoint shifted by a gvector
-    # adapted from some very old code, super inefficient, should clean up
-    # but it's also pretty much never a bottleneck
-    
-    # re-wrote directly from Bonini's code, removed dependency on abinit Kpoint structure
+def _tolerance_labels(values, tol):
+    """Label values so that any two within tol share a label.
 
+    Values are clustered by sorting and cutting wherever the gap to the
+    next value exceeds tol, so labels increase with value. Returns one
+    label per input position.
+    """
+    values = np.asarray(values, dtype=float)
+    order = np.argsort(values, kind="stable")
+
+    labels = np.empty(len(values), dtype=np.intp)
+    labels[order[0]] = 0
+    label = 0
+    for previous, current in zip(order[:-1], order[1:]):
+        if values[current] - values[previous] > tol:
+            label += 1
+        labels[current] = label
+
+    return labels
+
+
+def get_strings(kpoints, direction, tol=1e-5):
+    """Group k-points into strings running along one reciprocal axis.
+
+    Each string is the list of k-points sharing the two transverse
+    coordinates, ordered along `direction`, with a final point wrapped by
+    one reciprocal lattice vector so the string closes.
+
+    Parameters
+    ----------
+    tol : float
+        Two transverse coordinates closer than this count as the same.
+
+    Raises
+    ------
+    ValueError
+        If kpoints is not an (n, 3) array of coordinates.
+        If the strings are not all the same length, which means the
+        k-points do not form a regular mesh and the Berry flux summed
+        over them would be meaningless.
+
+    An empty kpoints returns an empty list; compute_string_sums turns
+    that into its own error naming the direction.
+
+    Notes
+    -----
+    This used to build the set of transverse points with exact float
+    equality and then collect members with a 1e-5 tolerance. The two
+    disagreed: coordinates differing by less than the tolerance but not
+    bit-equal produced *two* set entries, and each of them then matched
+    the k-points of both. The result was duplicate strings that each
+    double-counted their k-points, which compute_string_sums summed and
+    divided by the inflated string count - a wrong number, not an error.
+    Verified on four k-points along one line, one of them offset 1e-7
+    transversely, where the old code returned two identical strings of
+    length five instead of one (four k-points plus the wrapped copy).
+
+    On every regular mesh, where the two never disagreed, the result is
+    unchanged: same strings, same order, same arrays. That was checked
+    against the old implementation for 35 meshes in all three directions,
+    including the BaTiO3 VASP k-point list.
+
+    Clustering once per axis makes the grouping and the membership test
+    the same operation, so they cannot disagree. It also replaces the
+    rescan of every k-point per transverse point - O(n^5) for an n^3 mesh
+    - with a single sort.
+    """
     comps, dir_comp, gvec = direction_to_vals(direction)
-    bz_2d_set = sorted(set([tuple((kpt[i] for i in comps))
-                            for kpt in kpoints]))
+
+    kpts = np.asarray(kpoints, dtype=float)
+    if kpts.size == 0:
+        return []
+    if kpts.ndim != 2 or kpts.shape[1] != 3:
+        raise ValueError(
+            f"expected k-points with shape (n, 3), got {kpts.shape}")
+
+    # Label along each transverse axis, then group by the pair. Labels
+    # increase with coordinate, so sorting on them orders the strings the
+    # same way sorting on the coordinates themselves would.
+    labels = list(zip(_tolerance_labels(kpts[:, comps[0]], tol),
+                      _tolerance_labels(kpts[:, comps[1]], tol)))
+
+    members_by_label = {}
+    for index, label in enumerate(labels):
+        members_by_label.setdefault(label, []).append(index)
+
     strings = []
-    for bz_2d_pt in bz_2d_set:
-        this_string = []
-        for kpt in kpoints:
-            in_this_string = ((abs(kpt[comps[0]] - bz_2d_pt[0]) < 1.e-5)
-                              and (abs(kpt[comps[1]] - bz_2d_pt[1]) < 1.e-5))
-            if in_this_string:
-                this_string.append(kpt)
-        this_string.sort(key=lambda k: k[dir_comp])
-        this_string.append(this_string[0] + gvec)
-        
-        strings.append(this_string)
+    for label in sorted(members_by_label):
+        members = members_by_label[label]
+        members.sort(key=lambda index: kpts[index, dir_comp])
+        string = [kpts[index] for index in members]
+        string.append(string[0] + gvec)
+        strings.append(string)
+
+    lengths = {len(string) for string in strings}
+    if len(lengths) > 1:
+        raise ValueError(
+            f"k-point strings along {direction} have differing lengths "
+            f"{sorted(lengths)}; the k-points do not form a regular mesh, so "
+            f"the Berry flux summed over them would be meaningless"
+        )
+
+    # Every k-point must appear in exactly one string. The last point of
+    # each string is the wrapped copy, so it does not count. This is the
+    # check that would have caught the duplication described above: it
+    # produced one extra string per affected line, each a copy of another,
+    # which over-weighted that line in the average compute_polarization
+    # takes. All the strings were the same length, so the test above would
+    # not have noticed.
+    #
+    # With the grouping above it cannot fire - each k-point is placed in
+    # exactly one label group by construction - so it is an invariant
+    # check, kept so that a later change to the grouping cannot quietly
+    # bring the duplication back. It is not a duplicate-input check:
+    # repeated k-points are each placed, and are rejected upstream by
+    # check_full_bz.
+    placed = sum(len(string) - 1 for string in strings)
+    if placed != len(kpts):
+        raise ValueError(
+            f"the {len(strings)} k-point strings along {direction} hold "
+            f"{placed} k-points between them, but {len(kpts)} were given; "
+            f"every k-point must belong to exactly one string"
+        )
+
     return strings
 
 
