@@ -92,8 +92,6 @@ class Overlaps:
         if shift1_bool:
             gvecs1 = [g - gvec_shift for g in gvecs1]
         
-        overlap = np.zeros((len(pw_coeffs0), len(pw_coeffs1)), dtype=complex)
-        
         # check if gvecs0 and gvecs1 are the same
         if utils.check_gvecs_same(gvecs0, gvecs1):
             mapped_pw_coeffs0 = pw_coeffs0
@@ -103,11 +101,12 @@ class Overlaps:
         else:
             mapped_pw_coeffs0, mapped_pw_coeffs1 = utils.map_coeffs(pw_coeffs0, gvecs0, kpt0, pw_coeffs1, gvecs1, kpt1)
             
-        for i, wv0 in enumerate(mapped_pw_coeffs0):
-            for j, wv1 in enumerate(mapped_pw_coeffs1):
-                overlap[i,j] = np.vdot(wv0, wv1)
-                           
-        # return overlap
+        # overlap[i, j] = <band i at state 0 | band j at state 1>: one
+        # matrix product rather than a vdot per pair of bands. vdot
+        # conjugates its first argument, so the first factor is conjugated
+        # here. Rows are bands, so the second factor is transposed.
+        overlap = np.conj(mapped_pw_coeffs0) @ np.transpose(mapped_pw_coeffs1)
+
         return overlap
     
                                 
