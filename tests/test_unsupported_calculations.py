@@ -120,11 +120,13 @@ def function_def(tree, name):
     raise AssertionError(f"no function named {name}")
 
 
-def test_the_pinned_cutoff_is_defined_once():
-    """1000 eV is held deliberately, pending a reference to move it against.
+def test_the_cutoff_is_defined_once_and_scales_with_the_run():
+    """The default is None, meaning 4 x ENCUT, not a fixed number.
 
-    It lives in one named constant so that switching to the
-    4 x ENCUT default later is a one-line change, not a hunt for literals.
+    It lives in one named constant so that changing it is a one-line
+    change, not a hunt for literals. A fixed value stands in for a
+    quantity that scales with ENCUT; see the comment on MOMENTUM_ENCUT for
+    what the old pinned 1000 eV did to BaTiO3.
     """
     tree = vasp_parser_ast()
     assignments = [n for n in tree.body
@@ -132,7 +134,7 @@ def test_the_pinned_cutoff_is_defined_once():
                    and any(getattr(t, "id", None) == "MOMENTUM_ENCUT"
                            for t in n.targets)]
     assert len(assignments) == 1
-    assert assignments[0].value.value == 1000
+    assert assignments[0].value.value is None
 
 
 @pytest.mark.parametrize("name", ["get_paw_wfcn_data",

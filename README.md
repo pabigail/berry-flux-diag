@@ -127,16 +127,24 @@ part of pawpyseed that was used.
 
 The port was checked against pawpyseed's own C code. On the BaTiO₃ case in
 `tests/` (6×6×6 mesh, 20 occupied bands) every reconstructed coefficient
-agrees to 1.4×10⁻¹⁴ relative, and the polarization is unchanged:
+agrees to 1.4×10⁻¹⁴ relative. It is also much faster: roughly 6 s per
+WAVECAR against pawpyseed's 115 s for that case, on the same grid.
+
+The coefficients are expressed on one G grid shared by every k-point, with
+cutoff `VASPParser.MOMENTUM_ENCUT`. It defaults to 4 × the run's ENCUT,
+the physically motivated basis size. It used to be pinned at 1000 eV, and
+`momentum_encut=1000` reproduces numbers from before the change. For
+BaTiO₃ (µC/cm²):
 
 | | electronic | ionic | total |
 |---|---|---|---|
-| `VASPParser` | 17.18 | 28.65 | 45.84 |
+| `VASPParser`, 4 × ENCUT = 2720 eV (default) | 17.13 | 28.65 | 45.79 |
+| `VASPParser`, 1000 eV (before) | 17.18 | 28.65 | 45.84 |
 | `VASPParser_unnormalized` | 16.13 | 28.65 | 44.78 |
-| | **−6.1%** | — | −2.3% |
 
-It is also about 19× faster: roughly 6 s per WAVECAR against pawpyseed's
-115 s for that case.
+The larger grid holds 4.5× as many G vectors, and everything downstream
+that loops over them slows down accordingly: the BaTiO₃ VASP regression
+test takes about 8 minutes rather than 2.
 
 ### Regression tests
 
@@ -167,7 +175,7 @@ now redundant.
 > [!WARNING]
 > **The polarization it produces is not physically correct.** Without the
 > augmentation terms the overlap matrices are not unitary and the Berry
-> phases are wrong — by 6% in the electronic term above, and by an
+> phases are wrong — by 5.9% in the electronic term above, and by an
 > uncontrolled, species-dependent amount in general. Do not quote, plot or
 > publish a number from it.
 

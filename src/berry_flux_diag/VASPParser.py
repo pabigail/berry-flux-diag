@@ -10,27 +10,35 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Cutoff in eV for the PAW momentum grid. PINNED, NOT JUSTIFIED.
+# Cutoff in eV for the PAW momentum grid. None means 4 x the run's ENCUT.
 #
-# The grid's own default is 4 x the run's ENCUT (pawpyseed's, kept by
-# berry_flux_diag.paw), and that is the physically
-# motivated choice: the matrix elements are <psi|exp(iG.r)|psi>, which needs G
-# out to twice the wavefunction's G_max, and energy goes as G squared, so twice
-# the radius is four times the energy. The grid holds every G at or below the
-# cutoff, and get_reciprocal_fullfw projects each state onto it, so the cutoff
-# is the size of the basis the wavefunction is re-expressed in.
+# 4 x ENCUT is the physically motivated choice: the matrix elements are
+# <psi|exp(iG.r)|psi>, which needs G out to twice the wavefunction's G_max,
+# and energy goes as G squared, so twice the radius is four times the
+# energy. The grid holds every G at or below the cutoff, and
+# get_reciprocal_fullfw projects each state onto it, so the cutoff is the
+# size of the basis the wavefunction is re-expressed in. It scales with the
+# run, where a fixed number cannot.
 #
-# 1000 eV is a fixed number standing in for a quantity that scales with ENCUT.
-# For a run at ENCUT = 520 eV the cutoff should be 2080 eV, so this grid holds
-# roughly (1000/2080)^(3/2) - about a third - of the plane waves that default
-# considers necessary, and every state is projected onto a basis too small to
-# hold it. The shortfall is material-dependent: softer potentials are affected
-# less, harder ones more.
+# This used to be pinned at 1000 eV, a historical value rather than a
+# chosen one. For BaTiO3 (ENCUT = 680 eV, so 4 x ENCUT = 2720 eV) that grid
+# held 4833 G vectors against 21671 - 22% of the basis - and moving to the
+# default changed the result by
 #
-# It is kept only because moving it moves the VASP polarization.
-# tests/reference/batio3_vasp_nospin.json pins the number at this value; the
-# next step is to set this to None (4 x ENCUT), recapture, and record both.
-MOMENTUM_ENCUT = 1000
+#                         electronic    ionic      total   (uC/cm^2)
+#     1000 eV               17.1839    28.6538    45.8377
+#     4 x ENCUT, 2720 eV    17.1337    28.6538    45.7875
+#                            -0.29%       --      -0.11%
+#
+# tests/reference/batio3_vasp_nospin.json pins the second row. The first is
+# reproducible by passing momentum_encut=1000. The size of the shift is
+# material-dependent: harder potentials put more weight at large G.
+#
+# The cost is in the grid size. The PAW step itself only roughly doubles
+# (5.4 s -> 11.7 s per WAVECAR here), but everything downstream that loops
+# over G vectors scales with their number, 4.5x here; end to end the BaTiO3
+# capture went from about 2 to about 8 minutes, peaking at 5 GB.
+MOMENTUM_ENCUT = None
 
 def get_band_filling_from_wavecar_nospin(wavecar, tol):
 
@@ -108,11 +116,10 @@ def get_paw_wfcn_data(wavecar_file, potcar_file, vasprun_file,
     ----------
     momentum_encut : float or None
         Plane-wave cutoff in eV defining the momentum grid. Defaults to
-        MOMENTUM_ENCUT, which is pinned at the historical value rather
-        than chosen - read the comment on it. Pass None for four times
-        the run's ENCUT, which is the physically motivated choice, at the
-        cost of changing the answer relative to every VASP number this
-        code has produced so far.
+        MOMENTUM_ENCUT, which is None: four times the run's ENCUT, the
+        physically motivated choice - read the comment on it. Pass 1000
+        to reproduce VASP numbers this code produced before that became
+        the default.
 
     Returns
     -------
@@ -123,8 +130,8 @@ def get_paw_wfcn_data(wavecar_file, potcar_file, vasprun_file,
     wf = paw.Wavefunction.from_files(wavecar_file, potcar_file, vasprun_file,
                                      nbands=max_band_fill)
 
-    # Report the cutoff against the 4 x ENCUT default, so that a pinned value
-    # too small for the run says so at the time it is used rather than only
+    # Report the cutoff against the 4 x ENCUT default, so that a cutoff passed
+    # in too small for the run says so at the time it is used rather than only
     # in a comment. The plane-wave count goes as the cutoff to the 3/2.
     default_encut = 4 * wf.encut
 
@@ -166,7 +173,7 @@ def paw_wfcn_dict(wavecar_file, potcar_file, vasprun_file, max_band_fill,
         vasprun_file (str): Path to vasprun.xml
         kpoint_list (List[np.ndarray]): List of k-points (fractional coordinates)
         momentum_encut (float, None): momentum grid cutoff in eV; defaults
-            to the pinned MOMENTUM_ENCUT, None uses 4 x ENCUT.
+            to MOMENTUM_ENCUT, and None means 4 x ENCUT.
             See get_paw_wfcn_data.
 
     Returns:

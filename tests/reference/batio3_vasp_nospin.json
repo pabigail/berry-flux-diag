@@ -7,18 +7,18 @@
     "note": "WAVECAR/POTCAR are not committed; point the test at these directories with BFD_VASP_BATIO3_POL / BFD_VASP_BATIO3_NP."
   },
   "provenance": {
-    "captured_at": "2026-10-26T23:32:55+00:00",
-    "git_sha": "ccb5b7ebe73c6f52bc5071fa2f89dbeaefd2d5fa",
-    "git_dirty": false,
+    "captured_at": "2026-10-26T23:44:46+00:00",
+    "git_sha": "0053e52e843e78c99e2f1b1d63b717308255ad5f",
+    "git_dirty": true,
     "python": "3.12.8",
     "numpy": "2.2.4",
     "pymatgen": "2025.1.9"
   },
-  "polarization_norm": 45.83774842940153,
+  "polarization_norm": 45.78750920893876,
   "string_sums": [
-    -1.4261188266817701e-05,
-    -2.5116574340838402e-05,
-    3.0920039925203024
+    -1.4028081558404573e-05,
+    -2.45999051025563e-05,
+    3.0829641581323117
   ],
   "string_lens": [
     36,

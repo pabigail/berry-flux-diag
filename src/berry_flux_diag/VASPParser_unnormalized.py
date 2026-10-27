@@ -22,11 +22,14 @@ ZVAL and site positions, so it is unchanged. For the BaTiO3 case in
 tests/ (6x6x6 mesh, VASP PAW potentials):
 
                       electronic    ionic      total
-    VASPParser           17.18      28.65      45.84
+    VASPParser           17.13      28.65      45.79
     this module          16.13      28.65      44.78
-                        -6.1%         --      -2.3%
+                        -5.9%         --      -2.2%
 
-The 2.3% figure on the total is flattering: it is diluted by an ionic
+(VASPParser at its default momentum grid, 4 x ENCUT; at the old pinned
+1000 eV it gave 17.18 and 45.84, so the comparison was -6.1% and -2.3%.)
+
+The 2.2% figure on the total is flattering: it is diluted by an ionic
 term that was never in question. The error lives entirely in the 6%, and
 that number is an uncontrolled, species-dependent artifact rather than a
 bounded approximation - it is not a constant offset, and there is no
