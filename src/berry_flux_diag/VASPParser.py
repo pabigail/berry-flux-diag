@@ -21,18 +21,23 @@ logger = logging.getLogger(__name__)
 # run, where a fixed number cannot.
 #
 # This used to be pinned at 1000 eV, a historical value rather than a
-# chosen one. For BaTiO3 (ENCUT = 680 eV, so 4 x ENCUT = 2720 eV) that grid
-# held 4833 G vectors against 21671 - 22% of the basis - and moving to the
-# default changed the result by
+# chosen one. For BaTiO3 (ENCUT = 680 eV) the convergence with cutoff is
 #
-#                         electronic    ionic      total   (uC/cm^2)
-#     1000 eV               17.1839    28.6538    45.8377
-#     4 x ENCUT, 2720 eV    17.1337    28.6538    45.7875
-#                            -0.29%       --      -0.11%
+#                         G vectors   electronic    ionic      total   (uC/cm^2)
+#     1000 eV (old)          4833      17.1839    28.6538    45.8377
+#     3 x ENCUT, 2040 eV    14111      17.1446    28.6538    45.7984
+#     4 x ENCUT, 2720 eV    21671      17.1337    28.6538    45.7875   <- default
+#     6 x ENCUT, 4080 eV    39955      17.1297    28.6538    45.7835
 #
-# tests/reference/batio3_vasp_nospin.json pins the second row. The first is
-# reproducible by passing momentum_encut=1000. The size of the shift is
-# material-dependent: harder potentials put more weight at large G.
+# The steps shrink about as cutoff^-4. On that rough three-point fit, 4 x
+# ENCUT is within about 0.005 uC/cm^2 (0.03% of the electronic term) of the
+# converged value, against 0.054 for the old 1000 eV. 6 x ENCUT would roughly
+# double the cost for a 0.004 change, so 4 x is kept.
+#
+# tests/reference/batio3_vasp_nospin.json pins the default row, and
+# momentum_encut=1000 reproduces the old one. How fast this converges is
+# material-dependent: harder potentials put more weight at large G, so a
+# 6 x ENCUT spot-check is worth doing on a new material.
 #
 # The cost is in the grid size. The PAW step itself only roughly doubles
 # (5.4 s -> 11.7 s per WAVECAR here), but everything downstream that loops
