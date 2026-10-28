@@ -442,12 +442,91 @@ def _g_sphere(k, nbmax, b, encut):
     return G[etot <= encut].astype(np.int32)
 
 
+# WAVECAR precision tags: VASP 5 and VASP 6, single and double precision
+# coefficients. Only single precision is read; pawpyseed read every tag as
+# single, which silently misreads a double-precision file.
+_SINGLE_PRECISION_TAGS = (45200, 53300)
+_DOUBLE_PRECISION_TAGS = (45210, 53310)
+
+
+def _check_precision_tag(nprec, filename):
+    if nprec in _DOUBLE_PRECISION_TAGS:
+        raise ValueError(f"{filename} is a double-precision WAVECAR (tag {nprec}); "
+                         "only single precision is supported")
+    if nprec not in _SINGLE_PRECISION_TAGS:
+        raise ValueError(f"{filename}: unrecognised WAVECAR precision tag {nprec}; "
+                         f"expected one of {_SINGLE_PRECISION_TAGS}")
+
+
+class WavecarHeader:
+    """Everything in a WAVECAR except the plane-wave coefficients.
+
+    Reads only the header records - a few kilobytes, however large the file
+    - which is all VASPParser needs from it besides what read_wavecar
+    supplies. The attributes it shares with pymatgen's Wavecar have the same
+    names and layout, read from the same bytes, so code written against a
+    Wavecar works unchanged:
+
+    spin : int
+        1 or 2.
+    nk, nb : int
+        Number of k-points and bands.
+    encut : float
+    a : (3, 3) array
+        Lattice vectors, in rows.
+    kpoints : list of (3,) arrays
+        Fractional, in file order, from the first spin channel.
+    band_energy : list
+        Per k-point, an (nb, 3) array of Re E, Im E and occupation; for
+        spin = 2, one such list per spin channel.
+    vasp_type : str
+        'std', 'gam' or 'ncl', decided as pymatgen does: from the
+        plane-wave count at the first k-point, against the full G sphere
+        and the half sphere a gamma-only run stores.
+    """
+
+    def __init__(self, filename):
+        filename = str(filename)
+        raw = np.memmap(filename, dtype=np.float64, mode="r")
+        nrecl, nspin, nprec = (int(round(v)) for v in raw[:3])
+        _check_precision_tag(nprec, filename)
+        rec = nrecl // 8
+        self.spin = nspin
+        self.nk, self.nb = int(round(raw[rec])), int(round(raw[rec + 1]))
+        self.encut = float(raw[rec + 2])
+        self.a = np.array(raw[rec + 3: rec + 12]).reshape(3, 3)
+
+        nplanes, kpoints, band_energy = [], [], [[] for _ in range(nspin)]
+        for iwk in range(self.nk * nspin):
+            irec = iwk * (1 + self.nb)
+            hdr = raw[(irec + 2) * rec:(irec + 3) * rec]
+            if iwk < self.nk:
+                nplanes.append(int(round(hdr[0])))
+                kpoints.append(np.array(hdr[1:4]))
+            band_energy[iwk // self.nk].append(
+                np.array(hdr[4: 4 + 3 * self.nb]).reshape(self.nb, 3))
+        self.kpoints = kpoints
+        self.band_energy = band_energy[0] if nspin == 1 else band_energy
+        self.vasp_type = self._detect_type(nplanes[0], kpoints[0])
+
+    def _detect_type(self, nplane, kpoint):
+        b, nbmax = _setup(self.encut, self.a)
+        full = len(_g_sphere(kpoint, nbmax, b, self.encut))
+        if nplane == full:
+            return "std"
+        if nplane == 2 * full:
+            return "ncl"
+        # A gamma-only run stores one of each +G / -G pair, and G = 0.
+        if nplane == (full + 1) // 2:
+            return "gam"
+        return f"unrecognised ({nplane} plane waves against {full} in the G sphere)"
+
+
 def read_wavecar(filename, nbands=None):
     """read_wavecar: pawpyseed's own G ordering and G_bounds, single precision C."""
     raw = np.memmap(filename, dtype=np.float64, mode="r")
     nrecl, nspin, nprec = (int(round(v)) for v in raw[:3])
-    if nprec == 45210:
-        raise ValueError("double-precision WAVECAR: pawpyseed reads these as single")
+    _check_precision_tag(nprec, filename)
     rec = nrecl // 8
     nwk, nband = int(round(raw[rec])), int(round(raw[rec + 1]))
     encut = float(raw[rec + 2])

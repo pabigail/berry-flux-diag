@@ -1,7 +1,7 @@
 import logging
 
 from pymatgen.core.structure import Structure
-from pymatgen.io.vasp.outputs import Wavecar, Potcar
+from pymatgen.io.vasp.outputs import Potcar
 from pymatgen.analysis.ferroelectricity.polarization import zval_dict_from_potcar
 import numpy as np
 import berry_flux_diag.paw as paw
@@ -61,53 +61,6 @@ def get_band_filling_from_wavecar_spinpol(wavecar, tol, spin_channel):
     return utils.max_filled_bands(occupations, tol)
 
 
-
-# remove following
-def get_wfcn_dict_from_vasp(wavecar, kpoint_list, spin_pol):
-    # key of wfcn dict is a k-point
-    # each k-point has associated dict with coeffs and gvecs
-
-    wfcn_dict = {}
-    all_coeffs = wavecar.coeffs
-    all_gvecs = wavecar.Gpoints
-
-    TOL = 1e-6
-
-    if spin_pol:
-        spin_up = 0
-        spin_down = 1
-        max_band_fill_up = get_band_filling_from_wavecar_spinpol(wavecar, TOL, spin_up)
-        max_band_fill_down = get_band_filling_from_wavecar_spinpol(wavecar, TOL, spin_down)
-        logger.info('max_band_fill_up: %s', max_band_fill_up)
-        logger.info('max_band_fill_down: %s', max_band_fill_down)
-    else:
-        max_band_fill = get_band_filling_from_wavecar_nospin(wavecar, TOL)
-        logger.info('max_band_fill: %s', max_band_fill)
-
-    num_kpts = len(kpoint_list)
-    for index in range(0, num_kpts):
-        if spin_pol:
-            spin_up = 0
-            spin_down = 1
-            wfcn_up = np.array(all_coeffs[spin_up][index][0:max_band_fill_up])
-            wfcn_down = np.array(all_coeffs[spin_down][index][0:max_band_fill_down])
-            wfcn = []
-            wfcn.append(wfcn_up)
-            wfcn.append(wfcn_down)
-            wfcn = np.array(wfcn, dtype=object)
-        else:
-            wfcn = np.array(all_coeffs[index][0:max_band_fill])
-        gvecs = all_gvecs[index]
-
-        coeff_gvec_dict = {}
-        coeff_gvec_dict['wfcn'] = wfcn
-        coeff_gvec_dict['gvecs'] = gvecs
-        wfcn_dict[tuple(kpoint_list[index])] = coeff_gvec_dict
-
-    if spin_pol:
-        return wfcn_dict, max_band_fill_up, max_band_fill_down
-    else:
-        return wfcn_dict, max_band_fill
 
 # only works for non-spin-polarized wavefunctions...
 def get_paw_wfcn_data(wavecar_file, potcar_file, vasprun_file,
@@ -229,12 +182,16 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
     np_struct = Structure.from_file(np_POSCAR)
     utils.check_species_match(pol_struct, np_struct)
 
-    # vasp_type is left for pymatgen to detect from the plane-wave count,
-    # rather than asserted to be "std". Asserting it does not make it true:
-    # see utils.check_wavecar_type for what a pinned "std" does to a
-    # noncollinear WAVECAR.
-    pol_wavecar = Wavecar(pol_WAVECAR)
-    np_wavecar = Wavecar(np_WAVECAR)
+    # Only the header records: k-points, occupations, spin count and type.
+    # The coefficients are read once, by the PAW reconstruction below.
+    # Reading the files with pymatgen's Wavecar as well used to cost about
+    # 4.6 s per WAVECAR for BaTiO3 at 6x6x6, for coefficients nothing used.
+    # The type is detected from the plane-wave count, as Wavecar did, rather
+    # than asserted to be "std". Asserting it does not make it true: see
+    # utils.check_wavecar_type for what a pinned "std" does to a noncollinear
+    # WAVECAR.
+    pol_wavecar = paw.WavecarHeader(pol_WAVECAR)
+    np_wavecar = paw.WavecarHeader(np_WAVECAR)
 
     utils.check_wavecar_type(pol_wavecar.vasp_type, "polar")
     utils.check_wavecar_type(np_wavecar.vasp_type, "non-polar")
@@ -245,20 +202,13 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
     pol_vasprun = Path(pol_directory) / 'vasprun.xml'
     np_vasprun = Path(np_directory) / 'vasprun.xml'
 
-    # determine whether spin-polarized from shape of coefficient array
-    if len(np.shape(np.array(pol_wavecar.coeffs, dtype=object))) == 3:
-        pol_spin_pol = True
-    elif len(np.shape(np.array(pol_wavecar.coeffs, dtype=object))) == 2:
-        pol_spin_pol = False
-    else:
-        raise ValueError("dimensions of polar WAVECAR coefficients are inconsistent")
-
-    if len(np.shape(np.array(np_wavecar.coeffs, dtype=object))) == 3:
-        np_spin_pol = True
-    elif len(np.shape(np.array(np_wavecar.coeffs, dtype=object))) == 2:
-        np_spin_pol = False
-    else:
-        raise ValueError("dimensions of non-polar WAVECAR coefficients are inconsistent")
+    # determine whether spin-polarized from the header's spin count
+    for wavecar, label in ((pol_wavecar, "polar"), (np_wavecar, "non-polar")):
+        if wavecar.spin not in (1, 2):
+            raise ValueError(f"{label} WAVECAR reports {wavecar.spin} spin "
+                             "channels; expected 1 or 2")
+    pol_spin_pol = pol_wavecar.spin == 2
+    np_spin_pol = np_wavecar.spin == 2
 
     if pol_spin_pol != np_spin_pol:
         raise ValueError("polar and non-polar spin polarizations are inconsistent")
@@ -274,14 +224,6 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
     utils.check_kpoints_match(kpoint_list, np_kpoint_list)
     utils.check_full_bz(kpoint_list)
 
-
-    if spin_pol:
-        pol_wfcn_dict, _, _ = get_wfcn_dict_from_vasp(pol_wavecar, kpoint_list, spin_pol)
-        np_wfcn_dict, _, _ = get_wfcn_dict_from_vasp(np_wavecar, kpoint_list, spin_pol)
-    else:
-        pol_wfcn_dict, _ = get_wfcn_dict_from_vasp(pol_wavecar, kpoint_list, spin_pol)
-        np_wfcn_dict, _ = get_wfcn_dict_from_vasp(np_wavecar, kpoint_list, spin_pol)
-
     TOL = 1e-6    
 
     if spin_pol:
@@ -293,7 +235,8 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
         np_band_fill_down = get_band_filling_from_wavecar_spinpol(np_wavecar, TOL, spin_down)
     else:
         pol_band_fill = get_band_filling_from_wavecar_nospin(pol_wavecar, TOL)
-        np_band_fill = get_band_filling_from_wavecar_nospin(np_wavecar, TOL)    
+        np_band_fill = get_band_filling_from_wavecar_nospin(np_wavecar, TOL)
+        logger.info('max_band_fill: polar %s, non-polar %s', pol_band_fill, np_band_fill)
     
     pol_wfcn_dict_paw = paw_wfcn_dict(pol_WAVECAR, POTCAR, pol_vasprun,
                                       pol_band_fill, kpoint_list,
