@@ -57,6 +57,11 @@ class Overlaps:
         self.spin_pol = parse_dict['spin_pol']
         self.spin_state = 0 # this only matters for spin-polarized calculations
 
+        # Overlap matrices already computed, while compute_string_sums is
+        # running; None otherwise, so a direct compute_overlap call always
+        # computes. See compute_overlap for what a key holds.
+        self._overlap_cache = None
+
         if self.spin_pol:
             self.band_fill_up = np.min([parse_dict['pol_band_fill_up'],
                                         parse_dict['np_band_fill_up']])
@@ -82,7 +87,27 @@ class Overlaps:
         if not np.any(np.all(np.isclose(kpt1, self.kpoint_list), axis=1)):
             kpt1 = kpt1 - gvec_shift
             shift1_bool = True
-        
+
+        # The result is a function of exactly these: the spin channel, each
+        # side's structure and k-point as looked up, and the G shift applied
+        # to each side. Keyed on them, a cached matrix is the one this call
+        # would compute, bit for bit. A plaquette's polar/non-polar edge at
+        # one k-point recurs in the x, y and z strings, which is most of the
+        # reuse: 2592 overlaps become 1835 for a 6x6x6 mesh. The adjoint of
+        # a cached matrix is deliberately not reused for the reversed edge:
+        # it differs in the last bit, and would end bit-identity with the
+        # uncached computation for another 8%.
+        key = None
+        if self._overlap_cache is not None:
+            key = (self.spin_state,
+                   l0, tuple(np.around(kpt0, 6)),
+                   tuple(gvec_shift) if shift0_bool else None,
+                   l1, tuple(np.around(kpt1, 6)),
+                   tuple(gvec_shift) if shift1_bool else None)
+            cached = self._overlap_cache.get(key)
+            if cached is not None:
+                return cached
+
         pw_coeffs0, gvecs0 = self.get_pw_coeffs_from_state(l0, kpt0)
         pw_coeffs1, gvecs1 = self.get_pw_coeffs_from_state(l1, kpt1)
         
@@ -106,6 +131,11 @@ class Overlaps:
         # conjugates its first argument, so the first factor is conjugated
         # here. Rows are bands, so the second factor is transposed.
         overlap = np.conj(mapped_pw_coeffs0) @ np.transpose(mapped_pw_coeffs1)
+
+        if key is not None:
+            # Shared between callers from here on, so it must not change.
+            overlap.flags.writeable = False
+            self._overlap_cache[key] = overlap
 
         return overlap
     
@@ -198,9 +228,19 @@ class Overlaps:
         return curly_U, dict_svd
     
     
-    # calculate electronic contribution 
+    # calculate electronic contribution
     def compute_string_sums(self):
         ''' Modified directly from Bonini code '''
+        # Overlaps are cached for the length of one call and dropped after,
+        # so the memory is returned and a later call - after the spin
+        # channel or band filling has changed - starts from nothing.
+        self._overlap_cache = {}
+        try:
+            return self._compute_string_sums()
+        finally:
+            self._overlap_cache = None
+
+    def _compute_string_sums(self):
         strings_sums = []
         strings_len = []
         
