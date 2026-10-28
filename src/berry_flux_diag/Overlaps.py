@@ -88,9 +88,9 @@ class Overlaps:
         
         # shift gvecs if shifted kpoint
         if shift0_bool:
-            gvecs0 = [g - gvec_shift for g in gvecs0]
+            gvecs0 = np.asarray(gvecs0) - gvec_shift
         if shift1_bool:
-            gvecs1 = [g - gvec_shift for g in gvecs1]
+            gvecs1 = np.asarray(gvecs1) - gvec_shift
         
         # check if gvecs0 and gvecs1 are the same
         if utils.check_gvecs_same(gvecs0, gvecs1):

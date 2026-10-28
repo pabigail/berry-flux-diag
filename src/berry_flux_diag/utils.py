@@ -194,10 +194,14 @@ def gvec_extrema(gvecs):
 
 
 def gvec_to_index(gvec, kpt, max_rad, base):
-    # gvec: np.array [x, y, z] of current gvec
+    # gvec: np.array [x, y, z] of one gvec, or an (n, 3) array of them
     # kpt: accepted but NOT applied, see below
     # max_rad: maximum radius of all gvecs considered
     # base: base of expansion for x*base**2 + y*base + z
+    #
+    # Returns an int for one gvec and an int64 array for many. np.rint
+    # rounds half to even, as the builtin round() this used to call does,
+    # so the indices are unchanged; for integer gvecs it is exact either way.
 
     # The convention in force is that the index labels G alone, not G + k.
     # Whether it should instead be centred on the k-point is unresolved; the
@@ -205,18 +209,41 @@ def gvec_to_index(gvec, kpt, max_rad, base):
     # visible. Both structures are indexed the same way, so a consistent
     # choice cancels in the overlap - which is why this has not shown up as
     # a wrong answer. Pin the convention with a test before changing it.
-    kpt_centered_gvec = gvec # + kpt
-    shift = np.full(3, max_rad)
-    shifted_gvec = kpt_centered_gvec + shift
-    index = round(shifted_gvec[0])*base**2 + round(shifted_gvec[1])*base + round(shifted_gvec[2])
-    return index
+    kpt_centered_gvec = np.asarray(gvec) # + kpt
+    shifted_gvec = np.rint(kpt_centered_gvec + max_rad).astype(np.int64)
+    index = (shifted_gvec[..., 0]*base**2 + shifted_gvec[..., 1]*base
+             + shifted_gvec[..., 2])
+    return int(index) if index.ndim == 0 else index
+
+
+def _scatter_columns(coeffs, indices, width):
+    """Place column i of coeffs at column indices[i] of a zero matrix.
+
+    Where an index repeats, the last column wins, as it did when this was a
+    Python loop assigning one column at a time. A G list should not repeat
+    a vector, but if one does the result is unchanged rather than whatever
+    order numpy's fancy assignment happens to use.
+    """
+    coeffs = np.asarray(coeffs)
+    mapped = np.zeros((len(coeffs), width), dtype=complex)
+    reversed_indices = indices[::-1]
+    unique, first_in_reversed = np.unique(reversed_indices, return_index=True)
+    last = len(indices) - 1 - first_in_reversed
+    mapped[:, unique] = coeffs[:, last]
+    return mapped
 
 
 def map_coeffs(coeffs0, gvecs0, kpt0, coeffs1, gvecs1, kpt1):
-    
-    gvec_min0, gvec_max0, gvec_len0 = gvec_extrema(gvecs0)
-    gvec_min1, gvec_max1, gvec_len1 = gvec_extrema(gvecs1)
-    
+    """Lay two coefficient sets out on one shared G-vector index.
+
+    Each state's coefficients are scattered into a zero matrix whose
+    columns are labelled by gvec_to_index, so column c means the same G
+    vector in both and a plain inner product pairs them correctly. A G
+    vector present in only one state meets a zero in the other.
+    """
+    gvec_min0, gvec_max0, _ = gvec_extrema(gvecs0)
+    gvec_min1, gvec_max1, _ = gvec_extrema(gvecs1)
+
     max_g_rad = np.max([np.max(gvec_max0), np.max(gvec_max1)])
     min_g_rad = np.abs(np.min([np.min(gvec_min0), np.min(gvec_min1)]))
     max_rad = int(np.max([max_g_rad, min_g_rad]))
@@ -224,16 +251,13 @@ def map_coeffs(coeffs0, gvecs0, kpt0, coeffs1, gvecs1, kpt1):
     # gvec_to_index's x*base**2 + y*base + z encoding collision-free.
     base = (2*max_rad + 1)
     
-    coeffs0_mapped = np.zeros((len(coeffs0), base**3 + base**2 + base + 1), dtype=complex)
-    coeffs1_mapped = np.zeros((len(coeffs1), base**3 + base**2 + base + 1), dtype=complex)
+    width = base**3 + base**2 + base + 1
 
-    for i in range(gvec_len0):
-        mapped_i = gvec_to_index(gvecs0[i], kpt0, max_rad, base)
-        coeffs0_mapped[:, mapped_i] = coeffs0[:, i]
-    for i in range(gvec_len1):
-        mapped_i = gvec_to_index(gvecs1[i], kpt1, max_rad, base)
-        coeffs1_mapped[:, mapped_i] = coeffs1[:, i]
-        
+    coeffs0_mapped = _scatter_columns(
+        coeffs0, gvec_to_index(np.asarray(gvecs0), kpt0, max_rad, base), width)
+    coeffs1_mapped = _scatter_columns(
+        coeffs1, gvec_to_index(np.asarray(gvecs1), kpt1, max_rad, base), width)
+
     return coeffs0_mapped, coeffs1_mapped
 
 def extract_letters(input_string):
