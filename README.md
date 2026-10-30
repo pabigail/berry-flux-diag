@@ -16,6 +16,9 @@ polarization rather than an error. It removes the Intel MKL dependency
 by reimplementing the part of `pawpyseed` that was used, makes the VASP
 path roughly 15× faster, and adds more robust and systematic testing.
 
+These changes were implemented with [Claude Code](https://claude.com/claude-code).
+All tests and features were manually reviewed.
+
 ### 1. Bug fixes
 
 Several of these changed a polarization without raising an error, so
