@@ -704,20 +704,31 @@ class MomentumMatrix:
 
     def _aug_basis(self, k_idx):
         """The band-independent factor of fullwf_reciprocal's augmentation sum,
-        (numg, sum_s total_projs_s). pawpyseed recomputes this for every band."""
+        (numg, sum_s total_projs_s). pawpyseed recomputes this for every band.
+
+        Each Y_lm depends only on the direction of k + G, so it is computed
+        once per (l, m) here rather than once per site and projector channel;
+        each element's radial factors likewise once rather than once per site.
+        The products are formed in the same order, so the result is unchanged
+        bit for bit."""
         wav = self.wf.wav
         G = self._grid
         gcart = -(G + wav["kpts"][k_idx]) @ wav["reclattice"]
         r = np.sqrt(np.einsum("ij,ij->i", gcart, gcart))
         theta, phi = _angles(gcart, r)
         pref = 4 * PI * _det(wav["lattice"]) ** -0.5
+        ylm, radials = {}, {}
         cols = []
         for coord, el in zip(self.wf.coords, self.wf.site_elems):
             phase = np.exp(-2 * PI * 1j * (G @ coord))
-            radial = [wave_interpolate(r, el["kwave_grid"], f["kwave"], f["kwave_spline"])
-                      for f in el["funcs"]]
+            if id(el) not in radials:
+                radials[id(el)] = [wave_interpolate(r, el["kwave_grid"], f["kwave"],
+                                                    f["kwave_spline"]) for f in el["funcs"]]
+            radial = radials[id(el)]
             for n, l, m in el["lm"]:
-                cols.append(radial[n] * _ylm(l, m, theta, phi) * (1j ** l) * phase * pref)
+                if (l, m) not in ylm:
+                    ylm[l, m] = _ylm(l, m, theta, phi)
+                cols.append(radial[n] * ylm[l, m] * (1j ** l) * phase * pref)
         return np.array(cols).T
 
     def _pseudo(self, k_idx, bands):
