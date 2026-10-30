@@ -108,14 +108,3 @@ def _import_optional(name):
 QEParser = _import_optional("QEParser")
 BFDMaker = _import_optional("BFDMaker")
 BFDJobs = _import_optional("BFDJobs")
-
-# VASPParser_unnormalized is deliberately not imported here. It reads a
-# WAVECAR with pymatgen alone and omits the PAW augmentation terms, so the
-# polarization it produces is not physically correct. Importing it here would
-# make those numbers one attribute away from the real ones, so it must be
-# named explicitly:
-#
-#     from berry_flux_diag import VASPParser_unnormalized
-#
-# See that module's docstring before using it.
-
