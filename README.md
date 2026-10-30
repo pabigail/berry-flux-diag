@@ -83,6 +83,10 @@ Several of these changed a polarization without raising an error, so
   signature is unchanged.
 - Progress and results are logged rather than printed (see
   [Logging](#logging)).
+- `VASPParser_unnormalized` is removed. It skipped the PAW reconstruction,
+  so its polarization was not physically correct (5.9% off in the BaTiO₃
+  electronic term). It was kept only because it was the one VASP path that
+  ran without the MKL, and `VASPParser` now does too.
 
 ### 2. Dependency removal: `pawpyseed` and the Intel MKL
 
@@ -129,10 +133,10 @@ to the previous step, not merely within tolerance.
 ### 4. Testing
 
 The previous single test file had never run; it failed to import. There
-are now **224 tests in 17 files**. Only the two VASP regression tests need
+are now **223 tests in 17 files**. Only the VASP regression test needs
 data that is not in the repository. Coverage includes:
-- **Regression fixtures** for BaTiO₃ (QE, VASP, and VASP without the PAW
-  step), compared with `rtol=0`. The default relative tolerance had let a
+- **Regression fixtures** for BaTiO₃ (QE and VASP), compared with
+  `rtol=0`. The default relative tolerance had let a
   constant change pass unnoticed.
 - **The PAW building blocks against closed forms:**
   - the spherical Bessel transform of a Gaussian;
@@ -333,7 +337,6 @@ BaTiO₃ (µC/cm²):
 |---|---|---|---|
 | `VASPParser`, 4 × ENCUT = 2720 eV (default) | 17.13 | 28.65 | 45.79 |
 | `VASPParser`, 1000 eV (before) | 17.18 | 28.65 | 45.84 |
-| `VASPParser_unnormalized` | 16.13 | 28.65 | 44.78 |
 
 A convergence scan supports the default:
 
@@ -348,24 +351,6 @@ The steps between these rows shrink roughly as cutoff⁻⁴, which puts
 material-dependent, so pass a larger `momentum_encut` to check a new
 system.
 
-### `VASPParser_unnormalized`
-
-A parallel module that skips the PAW reconstruction and reads the WAVECAR
-with pymatgen alone. It was the only VASP path that ran without MKL, and is
-now redundant.
-
-> [!WARNING]
-> **The polarization it produces is not physically correct.** Without the
-> augmentation terms the overlap matrices are not unitary and the Berry
-> phases are wrong — by 5.9% in the electronic term above, and by an
-> uncontrolled, species-dependent amount in general. Do not quote, plot or
-> publish a number from it.
-
-It is not imported by `berry_flux_diag/__init__.py` and must be named
-explicitly (`from berry_flux_diag import VASPParser_unnormalized`). Its
-fixture is regenerated with `capture_reference.py vasp-unnormalized`. It is
-a candidate for deletion.
-
 ---
 
 ## Testing
@@ -375,16 +360,16 @@ pip install '.[QE,test]'
 pytest
 ```
 
-Without VASP data this runs 222 tests in about 7 seconds. The two VASP
-regression tests skip, and the QE regression test runs on inputs
+Without VASP data this runs 222 tests in about 7 seconds. The VASP
+regression test skips, and the QE regression test runs on inputs
 committed in `tests/`. WAVECAR files are too large to commit and POTCARs
-cannot be redistributed, so to run the VASP regression tests too, point
-them at a pair of run directories:
+cannot be redistributed, so to run the VASP regression test too, point
+it at a pair of run directories:
 
 ```bash
 export BFD_VASP_BATIO3_POL=/path/to/polar/run
 export BFD_VASP_BATIO3_NP=/path/to/nonpolar/run
-pytest            # 224 tests, about a minute
+pytest            # 223 tests, about 40 seconds
 ```
 
 `tests/reference/` pins the BaTiO₃ results for each path. To regenerate a

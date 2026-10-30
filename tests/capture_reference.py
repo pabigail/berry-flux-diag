@@ -9,16 +9,11 @@ Usage
 -----
     python tests/capture_reference.py qe
     python tests/capture_reference.py vasp --pol-dir <dir> --np-dir <dir>
-    python tests/capture_reference.py vasp-unnormalized --pol-dir <dir> --np-dir <dir>
 
 The QE inputs live in the repo (tests/BaTiO3_QE_IO_nospin). VASP inputs do
 not: WAVECAR files are hundreds of megabytes and POTCAR files are
 copyrighted, so pass their location on the command line or set
 BFD_VASP_BATIO3_POL / BFD_VASP_BATIO3_NP.
-
-The vasp-unnormalized mode captures VASPParser_unnormalized, which skips
-the PAW reconstruction. Its number is not a physical polarization, but it is
-deterministic.
 """
 
 from __future__ import annotations
@@ -45,10 +40,6 @@ REFERENCE_DIR = REPO / "tests" / "reference"
 
 # Files the VASP parser reads from a run directory, unzipped.
 VASP_FILES = ("POSCAR", "WAVECAR", "POTCAR", "vasprun.xml")
-
-# The unnormalized parser reads the WAVECAR with pymatgen alone, so it needs
-# no vasprun.xml.
-VASP_UNNORMALIZED_FILES = ("POSCAR", "WAVECAR", "POTCAR")
 
 
 def provenance() -> dict:
@@ -182,50 +173,9 @@ def capture_vasp(pol_src: Path, np_src: Path) -> dict:
         }
 
 
-def capture_vasp_unnormalized(pol_src: Path, np_src: Path) -> dict:
-    """Reference for VASPParser_unnormalized.
-
-    The polarization here is physically wrong - the PAW augmentation terms
-    are missing - but it is deterministically wrong, which is all a
-    regression fixture needs.
-    """
-    from berry_flux_diag import VASPParser_unnormalized as vasp_unnorm
-
-    with tempfile.TemporaryDirectory(prefix="bfd_vasp_unnorm_ref_") as tmp:
-        stage = VASP_UNNORMALIZED_FILES
-        pol_dir = stage_vasp_dir(pol_src, Path(tmp) / "pol", stage)
-        np_dir = stage_vasp_dir(np_src, Path(tmp) / "np", stage)
-
-        parse_dict = vasp_unnorm.vasp_parser(
-            str(pol_dir / "POSCAR"),
-            str(np_dir / "POSCAR"),
-            str(pol_dir / "WAVECAR"),
-            str(np_dir / "WAVECAR"),
-            str(pol_dir / "POTCAR"),
-        )
-        overlaps = bfd.Overlaps.Overlaps(parse_dict)
-        pol_norm, _ = overlaps.compute_polarization()
-
-        return {
-            "code": "VASP_unnormalized",
-            "system": "BaTiO3, non-spin-polarized",
-            "warning": "NOT a physical polarization: the PAW augmentation "
-                       "terms are missing. This fixture exists only to detect "
-                       "unintended changes in VASPParser_unnormalized.",
-            "inputs": {
-                "pol_dir": str(pol_src),
-                "np_dir": str(np_src),
-                "note": "WAVECAR/POTCAR are not committed; point the test at these "
-                        "directories with BFD_VASP_BATIO3_POL / BFD_VASP_BATIO3_NP.",
-            },
-            "provenance": provenance(),
-            **summarize(overlaps, pol_norm),
-        }
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("code", choices=["qe", "vasp", "vasp-unnormalized"])
+    parser.add_argument("code", choices=["qe", "vasp"])
     parser.add_argument("--pol-dir", type=Path, help="VASP run directory, polar structure")
     parser.add_argument("--np-dir", type=Path, help="VASP run directory, nonpolar structure")
     parser.add_argument("--out", type=Path, help="where to write the JSON")
@@ -237,12 +187,8 @@ def main() -> None:
     else:
         if not (args.pol_dir and args.np_dir):
             parser.error(f"{args.code} needs --pol-dir and --np-dir")
-        if args.code == "vasp":
-            result = capture_vasp(args.pol_dir, args.np_dir)
-            out = args.out or REFERENCE_DIR / "batio3_vasp_nospin.json"
-        else:
-            result = capture_vasp_unnormalized(args.pol_dir, args.np_dir)
-            out = args.out or REFERENCE_DIR / "batio3_vasp_unnormalized_nospin.json"
+        result = capture_vasp(args.pol_dir, args.np_dir)
+        out = args.out or REFERENCE_DIR / "batio3_vasp_nospin.json"
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2) + "\n")

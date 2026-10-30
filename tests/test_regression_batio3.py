@@ -25,11 +25,7 @@ import pytest
 import berry_flux_diag as bfd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from capture_reference import (  # noqa: E402
-    capture_qe,
-    capture_vasp,
-    capture_vasp_unnormalized,
-)
+from capture_reference import capture_qe, capture_vasp  # noqa: E402
 
 # Tolerances. The string sums are a sum of ~N^3 independent plaquette phases,
 # so reordering the arithmetic (vectorizing, parallelizing) moves the last
@@ -86,22 +82,3 @@ def test_batio3_vasp_nospin(vasp_reference, vasp_run_dirs):
     """VASP path, using run directories named by the environment."""
     pol_dir, np_dir = vasp_run_dirs
     assert_matches_reference(capture_vasp(pol_dir, np_dir), vasp_reference)
-
-
-def test_batio3_vasp_unnormalized_nospin(vasp_unnormalized_reference, vasp_run_dirs):
-    """VASP path without the PAW reconstruction.
-
-    The polarization pinned here is not physical - the PAW augmentation
-    terms are missing - so it must never be compared against the VASP
-    reference or quoted anywhere. It is pinned because it is deterministic.
-    It dates from when this was the only VASP path that ran without MKL.
-
-    Slower than the QE case - about two minutes on a 6x6x6 mesh - because
-    it walks 3*N^3 plaquettes through the un-vectorized overlap loop. That
-    cost is the thing the vectorization work is meant to remove, so this
-    test doubles as a before-and-after measurement.
-    """
-    pol_dir, np_dir = vasp_run_dirs
-    assert_matches_reference(
-        capture_vasp_unnormalized(pol_dir, np_dir), vasp_unnormalized_reference
-    )
