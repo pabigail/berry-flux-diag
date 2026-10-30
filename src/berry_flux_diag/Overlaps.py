@@ -1,22 +1,48 @@
 #!/usr/bin/env python
 
+import logging
+
 import numpy as np
 import berry_flux_diag.utils as utils
+from berry_flux_diag.constants import E_PER_ANG2_TO_MUC_PER_CM2
 from pymatgen.core.structure import Structure
 from pymatgen.util.coord_cython import pbc_shortest_vectors
+
+logger = logging.getLogger(__name__)
+
+
+# Diagnostic thresholds. Neither is a physical constant: both flag a k-mesh
+# too coarse for the phase to be tracked from one k-point to the next, and
+# both are warnings rather than errors.
+
+# A Wilson loop phase lives in (-pi, pi]. One approaching the branch cut at
+# +/- pi cannot be assigned to a branch with confidence, so the loop sum
+# becomes unreliable. 2.8 rad is about 0.891 pi, i.e. within 11% of the cut.
+EIG_THRESH = 2.8
+
+# Singular values of the overlap matrix between the occupied manifolds at
+# two adjacent k-points: 1 is perfect overlap, 0 means a band has rotated
+# entirely out of the manifold. When the smallest approaches 0 the unitary
+# recovered as u @ v is reconstructing a nearly singular rotation, and the
+# parallel transport through that plaquette cannot be trusted.
+SING_VAL_THRESH = 0.2
 
 
 class Overlaps:
     
-    def __init__(self, parse_dict):
+    def __init__(self, parse_dict, eig_thresh=EIG_THRESH,
+                 sing_val_thresh=SING_VAL_THRESH):
         ''' intialize using vasp_parse_dict or qe_parse_dict
-        
-            pol_struct: pymatgen structure 
+
+            pol_struct: pymatgen structure
             np_struct: pymatgen structure
             kpoint_list: list of np arrays
             pol_wave_coeffs: numpy array of coefficients in the format
             np_wave_coeffs: numpy array of coefficients in the format
-            
+
+            eig_thresh: warn above this Wilson loop phase, in radians
+            sing_val_thresh: warn below this overlap singular value
+
             in this version, no spin polarization, must use full k-grid (not IBZ)
          '''
         self.pol_struct = parse_dict['pol_struct']
@@ -24,13 +50,17 @@ class Overlaps:
         self.pol_wfcn_dict = parse_dict['pol_wfcn_dict']
         self.np_wfcn_dict = parse_dict['np_wfcn_dict']
         self.kpoint_list = parse_dict['kpoint_list']
-#         self.band_fill = np.min([parse_dict['pol_band_fill'], 
-#                                  parse_dict['np_band_fill']]) # changed this from np.max to np.min
         self.zval_dict = parse_dict['zval_dict']
-        self.eig_thresh = 2.8
+        self.eig_thresh = eig_thresh
+        self.sing_val_thresh = sing_val_thresh
         self.ES_code = parse_dict['ES_code']
         self.spin_pol = parse_dict['spin_pol']
         self.spin_state = 0 # this only matters for spin-polarized calculations
+
+        # Overlap matrices already computed, while compute_string_sums is
+        # running; None otherwise, so a direct compute_overlap call always
+        # computes. See compute_overlap for what a key holds.
+        self._overlap_cache = None
 
         if self.spin_pol:
             self.band_fill_up = np.min([parse_dict['pol_band_fill_up'],
@@ -42,7 +72,7 @@ class Overlaps:
                                      parse_dict['np_band_fill']])
     
     # calculate overlaps
-    def compute_overlap(self, l0, kpt0, l1, kpt1, direction, space = 'g'):
+    def compute_overlap(self, l0, kpt0, l1, kpt1, direction):
         '''
         returns overlap matrix between states (l0, kpt0) and (l1, kpt1)
         '''
@@ -57,17 +87,35 @@ class Overlaps:
         if not np.any(np.all(np.isclose(kpt1, self.kpoint_list), axis=1)):
             kpt1 = kpt1 - gvec_shift
             shift1_bool = True
-        
+
+        # The result is a function of exactly these: the spin channel, each
+        # side's structure and k-point as looked up, and the G shift applied
+        # to each side. Keyed on them, a cached matrix is the one this call
+        # would compute, bit for bit. A plaquette's polar/non-polar edge at
+        # one k-point recurs in the x, y and z strings, which is most of the
+        # reuse: 2592 overlaps become 1835 for a 6x6x6 mesh. The adjoint of
+        # a cached matrix is deliberately not reused for the reversed edge:
+        # it differs in the last bit, and would end bit-identity with the
+        # uncached computation for another 8%.
+        key = None
+        if self._overlap_cache is not None:
+            key = (self.spin_state,
+                   l0, tuple(np.around(kpt0, 6)),
+                   tuple(gvec_shift) if shift0_bool else None,
+                   l1, tuple(np.around(kpt1, 6)),
+                   tuple(gvec_shift) if shift1_bool else None)
+            cached = self._overlap_cache.get(key)
+            if cached is not None:
+                return cached
+
         pw_coeffs0, gvecs0 = self.get_pw_coeffs_from_state(l0, kpt0)
         pw_coeffs1, gvecs1 = self.get_pw_coeffs_from_state(l1, kpt1)
         
         # shift gvecs if shifted kpoint
         if shift0_bool:
-            gvecs0 = [g - gvec_shift for g in gvecs0]
+            gvecs0 = np.asarray(gvecs0) - gvec_shift
         if shift1_bool:
-            gvecs1 = [g - gvec_shift for g in gvecs1]
-        
-        overlap = np.zeros((len(pw_coeffs0), len(pw_coeffs1)), dtype=complex)
+            gvecs1 = np.asarray(gvecs1) - gvec_shift
         
         # check if gvecs0 and gvecs1 are the same
         if utils.check_gvecs_same(gvecs0, gvecs1):
@@ -78,11 +126,17 @@ class Overlaps:
         else:
             mapped_pw_coeffs0, mapped_pw_coeffs1 = utils.map_coeffs(pw_coeffs0, gvecs0, kpt0, pw_coeffs1, gvecs1, kpt1)
             
-        for i, wv0 in enumerate(mapped_pw_coeffs0):
-            for j, wv1 in enumerate(mapped_pw_coeffs1):
-                overlap[i,j] = np.vdot(wv0, wv1)
-                           
-        # return overlap
+        # overlap[i, j] = <band i at state 0 | band j at state 1>: one
+        # matrix product rather than a vdot per pair of bands. vdot
+        # conjugates its first argument, so the first factor is conjugated
+        # here. Rows are bands, so the second factor is transposed.
+        overlap = np.conj(mapped_pw_coeffs0) @ np.transpose(mapped_pw_coeffs1)
+
+        if key is not None:
+            # Shared between callers from here on, so it must not change.
+            overlap.flags.writeable = False
+            self._overlap_cache[key] = overlap
+
         return overlap
     
                                 
@@ -116,14 +170,42 @@ class Overlaps:
         return pw_coeffs, gvecs                         
     
     
+    def check_overlap_conditioning(self, s):
+        """Warn when the occupied manifolds at adjacent k-points barely overlap.
+
+        Returns the smallest singular value so a caller can record it
+        without walking the debug payload afterwards.
+        """
+        smallest_sing_val = min(s)
+        if smallest_sing_val < self.sing_val_thresh:
+            logger.warning('min singular value %s is below %s; occupied bands '
+                           'barely overlap between adjacent k-points, so this '
+                           'plaquette is unreliable',
+                           smallest_sing_val, self.sing_val_thresh)
+        return smallest_sing_val
+
+    def check_wilson_loop_phases(self, wlevs):
+        """Warn when a Wilson loop phase approaches the branch cut at +/- pi.
+
+        Returns the largest phase magnitude found.
+        """
+        largest = 0.0
+        for eig in wlevs:
+            if np.abs(eig) > self.eig_thresh:
+                logger.warning('found eigenvalue %s; k-sampling is underconverged', eig)
+            largest = max(largest, np.abs(eig))
+        return largest
+
     # get unitary along path
     def get_unitary_along_path(self, loop_path, direction):
         path_pairs = zip(loop_path[:-1], loop_path[1:])
-        curly_U = np.identity(self.band_fill)
+        # Complex from the start: every curly_M is complex, so a real
+        # identity is upcast on the first dot anyway.
+        curly_U = np.identity(self.band_fill, dtype=complex)
         
         # save for debugging
         dict_svd = {}
-        dict_svd['M'] = []
+        dict_svd['curly_M'] = []
         dict_svd['states'] = []
         dict_svd['s'] = []
         dict_svd['U'] = []
@@ -133,14 +215,12 @@ class Overlaps:
             # compute each overlap on-the-fly
             M = self.compute_overlap(l0, kpt0, l1, kpt1, direction)
             u, s, v = np.linalg.svd(M)
-            smallest_sing_val = min(s)
-            if smallest_sing_val < 0.2:
-                print(f'min singular value: {min(s)}')
+            self.check_overlap_conditioning(s)
             curly_M = np.dot(u, v)
             curly_U = np.dot(curly_U, curly_M)
             
             # save for debugging
-            dict_svd['M'].append(curly_M)
+            dict_svd['curly_M'].append(curly_M)
             dict_svd['states'].append(states)
             dict_svd['s'].append(s)
             dict_svd['U'].append(curly_U)
@@ -148,9 +228,19 @@ class Overlaps:
         return curly_U, dict_svd
     
     
-    # calculate electronic contribution 
+    # calculate electronic contribution
     def compute_string_sums(self):
         ''' Modified directly from Bonini code '''
+        # Overlaps are cached for the length of one call and dropped after,
+        # so the memory is returned and a later call - after the spin
+        # channel or band filling has changed - starts from nothing.
+        self._overlap_cache = {}
+        try:
+            return self._compute_string_sums()
+        finally:
+            self._overlap_cache = None
+
+    def _compute_string_sums(self):
         strings_sums = []
         strings_len = []
         
@@ -158,8 +248,14 @@ class Overlaps:
         dict_debug = {}
         
         for direction in ["x", "y", "z"]:
-            print(direction)
+            logger.debug('computing strings along %s', direction)
             strings = utils.get_strings(self.kpoint_list, direction)
+            if not strings:
+                raise ValueError(
+                    f"no k-point strings found along {direction} in a list of "
+                    f"{len(self.kpoint_list)} k-points; the mesh does not span "
+                    f"the Brillouin zone in that direction"
+                )
             string_phases = []
             
             # save for debugging
@@ -177,10 +273,12 @@ class Overlaps:
                                  (0, kpt1), 
                                  (0, kpt0)]
                     curly_U, dict_svd = self.get_unitary_along_path(loop_path, direction)
-                    wlevs = np.log(np.linalg.eigvals(curly_U)).imag
-                    for eig in wlevs:
-                        if np.abs(eig) > 2.8:
-                            print(f'found eigenvalue {eig}; k-sampling is underconverged')
+                    # np.angle is the imaginary part of np.log for a nonzero
+                    # argument, without computing the log magnitude that was
+                    # then thrown away. Eigenvalues of a unitary matrix have
+                    # modulus 1, so the zero case cannot arise.
+                    wlevs = np.angle(np.linalg.eigvals(curly_U))
+                    self.check_wilson_loop_phases(wlevs)
                     inner_loop_sum += sum(wlevs) / (2 * np.pi)
                     
                     # save for debugging
@@ -189,10 +287,9 @@ class Overlaps:
                     dict_eigs['eigs'].append(wlevs)
                     
                 string_phases.append(inner_loop_sum)
-                string_sum = sum(string_phases)
-                
+
             dict_debug[direction] = dict_eigs
-            strings_sums.append(string_sum)
+            strings_sums.append(sum(string_phases))
             strings_len.append(len(strings))
         return strings_sums, strings_len, dict_debug
     
@@ -234,35 +331,33 @@ class Overlaps:
             tot_ionic.append(self.calc_ionic(frac_coord, self.pol_struct, zval))
         ion_diff =  np.sum(tot_ionic, axis=0) # in electron Angstroms:
         
-        # convert to muC/cm^2
-        e_to_muC = -1.6021766e-13
-        cm2_to_A2 = 1e16
-        pol_volume = [self.pol_struct.lattice.volume]
-        pol_units = 1.0 / np.array(pol_volume)
-        pol_units *= e_to_muC * cm2_to_A2
-        ionic_contrib = pol_units * ion_diff # in muC/cm^2                      
+        # convert to muC/cm^2. The sign is negative because calc_ionic already
+        # returns -z*dr, so the two cancel to the usual +sum(z*dr).
+        pol_units = -E_PER_ANG2_TO_MUC_PER_CM2 / self.pol_struct.lattice.volume
+        ionic_contrib = pol_units * ion_diff # in muC/cm^2
         
         return ionic_contrib
     
     
     
     def get_spont_pol(self, elec_change):
-        # still hard coded for c direction polarization
-    
+        # Returns all three components. Valid only for an orthogonal cell:
+        # the fractional electronic change is scaled by a, b and c
+        # separately, which is not the general lattice transformation.
         ion_contrib = self.get_ionic_pol_change() # muC / cm^2
 
-        elec_contrib_x = ((utils.ECHARGE * 10 ** 20) * np.array(elec_change[0]) * 
-                          self.pol_struct.lattice.a / self.pol_struct.lattice.volume)
-        elec_contrib_y = ((utils.ECHARGE * 10 ** 20) * np.array(elec_change[1]) * 
-                          self.pol_struct.lattice.b / self.pol_struct.lattice.volume)
-        elec_contrib_z = ((utils.ECHARGE * 10 ** 20) * np.array(elec_change[2]) * 
-                          self.pol_struct.lattice.c / self.pol_struct.lattice.volume)
+        lattice = self.pol_struct.lattice
+        scale = E_PER_ANG2_TO_MUC_PER_CM2 / lattice.volume
+
+        elec_contrib_x = scale * np.array(elec_change[0]) * lattice.a
+        elec_contrib_y = scale * np.array(elec_change[1]) * lattice.b
+        elec_contrib_z = scale * np.array(elec_change[2]) * lattice.c
+
+        elec_contrib = np.array([elec_contrib_x, elec_contrib_y, elec_contrib_z]) # muC / cm^2
         
-        elec_contrib = 100 * np.array([elec_contrib_x, elec_contrib_y, elec_contrib_z]) # muC / cm^2
         
-        
-        print(f'electronic contribution: {elec_contrib}')
-        print(f'ionic contribution: {ion_contrib}')
+        logger.info('electronic contribution: %s', elec_contrib)
+        logger.info('ionic contribution: %s', ion_contrib)
 
         return ion_contrib + elec_contrib
     
@@ -274,12 +369,12 @@ class Overlaps:
             self.spin_state = 0
             self.band_fill = self.band_fill_up
             strings_sum_up, strings_len_up, dict_debug_up = self.compute_string_sums()
-            print(f'string_sums_up: {strings_sum_up}')
+            logger.info('string_sums_up: %s', strings_sum_up)
 
             self.spin_state = 1
             self.band_fill = self.band_fill_down
             strings_sum_down, strings_len_down, dict_debug_down = self.compute_string_sums()
-            print(f'string_sums_up: {strings_sum_down}')
+            logger.info('string_sums_down: %s', strings_sum_down)
 
             occ_fact = 1
             elec_change = [occ_fact*(strings_sum_up[0] + strings_sum_down[0])/strings_len_up[0],
@@ -291,7 +386,7 @@ class Overlaps:
         else:
 
             strings_sum, strings_len, dict_debug = self.compute_string_sums()
-            print(f'string_sums: {strings_sum}')
+            logger.info('string_sums: %s', strings_sum)
 
             occ_fact = 2
             elec_change = [occ_fact * strings_sum[0] / strings_len[0],
@@ -310,6 +405,6 @@ class Overlaps:
                                 b * final_pol[1] +
                                 c * final_pol[2])
 
-        print(f'final_pol frac: {final_pol}')
-        print(f'polarization: {P_norm} muC / cm^2')
+        logger.info('final_pol frac: %s', final_pol)
+        logger.info('polarization: %s muC / cm^2', P_norm)
         return P_norm, dict_debug

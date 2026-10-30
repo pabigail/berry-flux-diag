@@ -1,15 +1,17 @@
+import logging
+
 from pymatgen.core.structure import Structure
 from pymatgen.io.pwscf import PWOutput
 import qeschema
 import h5py
 import numpy as np
 import berry_flux_diag.utils as utils
+from berry_flux_diag.constants import BOHR_TO_ANGSTROM
+
+logger = logging.getLogger(__name__)
 
 def get_struct_from_qeschema(xml_data):
-    
-    # convert from Bohr to Angstrom
-    BOHR_TO_ANGSTROM = 0.5291772
-    
+
     atomic_struct = xml_data['qes:espresso']['output']['atomic_structure']
 
     lattice = [list(np.array(atomic_struct['cell']['a1'])*BOHR_TO_ANGSTROM),
@@ -28,13 +30,46 @@ def get_struct_from_qeschema(xml_data):
 
 
 def get_spin_pol_from_qeschema(xml_data):
-    '''returns False if calc is non-spin polarized
-    returns True if calc is spin-polarized'''
-    spin_data = xml_data['qes:espresso']['input']['spin'] 
-    lsda_bool = spin_data['lsda']
-    noncolin_bool = spin_data['noncolin']
-    spinorbit_bool = spin_data['spinorbit'] 
-    return lsda_bool or noncolin_bool or spinorbit_bool
+    """Whether the run is collinear spin-polarized (LSDA).
+
+    Returns
+    -------
+    bool
+        True for an LSDA run with two collinear spin channels, False for a
+        run with none.
+
+    Raises
+    ------
+    NotImplementedError
+        If the run is noncollinear or includes spin-orbit coupling.
+
+    Notes
+    -----
+    These three QE flags used to be OR-ed together into a single "is this
+    spin-polarized" answer, which sent a noncollinear run down the collinear
+    two-channel path. That path reads nbnd_up and nbnd_dw from the band
+    structure and opens wfcup*.hdf5 and wfcdw*.hdf5, none of which a
+    noncollinear run writes, so it failed somewhere downstream with a
+    KeyError or a missing file rather than saying what was wrong.
+
+    Supporting it is not a matter of routing: a noncollinear run stores a
+    two-component spinor per plane wave, and the overlap between two states
+    has to be summed over those components. Everything downstream here
+    assumes a scalar wavefunction.
+    """
+    spin_data = xml_data['qes:espresso']['input']['spin']
+
+    if spin_data['noncolin'] or spin_data['spinorbit']:
+        raise NotImplementedError(
+            f"this is a noncollinear calculation (noncolin="
+            f"{spin_data['noncolin']}, spinorbit={spin_data['spinorbit']}), "
+            f"which berry_flux_diag does not support: its wavefunctions are "
+            f"two-component spinors, and the overlaps computed here assume a "
+            f"scalar wavefunction. Use a collinear calculation - noncolin "
+            f"= .false. and lspinorb = .false. - or nothing below is valid."
+        )
+
+    return spin_data['lsda']
 
 
 def get_kpt_list_from_qeschema(xml_data):
@@ -50,60 +85,27 @@ def get_kpt_list_from_qeschema(xml_data):
 
 def get_band_filling_from_qeschema_nospin(xml_data, tol):
 
-    max_band_fill = 0
     band_struct_dict = xml_data['qes:espresso']['output']['band_structure']
     ks_energies = band_struct_dict['ks_energies']
 
-    for kpt in ks_energies:
-        band_filling = kpt['occupations']['$']
-        if band_filling[-1] >= tol:
-            temp_band_index = len(band_filling)
-        else:
-            temp_band_index = next(index for index, i in enumerate(band_filling) if i < tol)
+    occupations = (kpt['occupations']['$'] for kpt in ks_energies)
 
-        if temp_band_index != 0:
-            if (temp_band_index - 1) > max_band_fill:
-                max_band_fill = temp_band_index
-        else:
-            raise ValueError("band filling is zero")
-
-    return max_band_fill
+    return utils.max_filled_bands(occupations, tol)
 
 def get_band_filling_from_qeschema_spinpol(xml_data, tol):
 
-    max_band_fill_up = 0
-    max_band_fill_dw = 0
     band_struct_dict = xml_data['qes:espresso']['output']['band_structure']
     ks_energies = band_struct_dict['ks_energies']
     nband_up = band_struct_dict['nbnd_up']
     nband_dw = band_struct_dict['nbnd_dw']
 
-    for kpt in ks_energies:
-        band_filling_up = kpt['occupations']['$'][0:nband_up]
-        band_filling_dw = kpt['occupations']['$'][nband_up:nband_up+nband_dw]
+    # QE writes both spin channels end to end in one occupations array.
+    occupations_up = (kpt['occupations']['$'][0:nband_up] for kpt in ks_energies)
+    occupations_dw = (kpt['occupations']['$'][nband_up:nband_up + nband_dw]
+                      for kpt in ks_energies)
 
-        if band_filling_up[-1] >= tol:
-            temp_band_index_up = nband_up
-        else:
-            temp_band_index_up = next(index for index,
-                                      i in enumerate(band_filling_up) if i < tol)
-
-        if band_filling_dw[-1] >= tol:
-            temp_band_index_dw = nband_dw
-        else:
-            temp_band_index_dw = next(index for index,
-                                      i in enumerate(band_filling_dw) if i < tol)
-
-        if temp_band_index_up != 0 and temp_band_index_dw != 0:
-
-            if (temp_band_index_up - 1) > max_band_fill_up:
-                max_band_fill_up = temp_band_index_up
-
-            if (temp_band_index_dw - 1) > max_band_fill_dw:
-                max_band_fill_dw = temp_band_index_dw
-
-        else:
-            raise ValueError("band filling is zero")
+    max_band_fill_up = utils.max_filled_bands(occupations_up, tol)
+    max_band_fill_dw = utils.max_filled_bands(occupations_dw, tol)
 
     return max_band_fill_up, max_band_fill_dw
 
@@ -186,22 +188,62 @@ def get_wfcn_gvecs_from_hdf5_spinpol(wfc_folder_path, kpoint_list, max_band_fill
 
 
 def get_zval_dict_from_PWOutput(pw_out):
-    
+    """Valence charge per element, read from the pseudopotential banner.
+
+    Quantum ESPRESSO prints one block per species, for example::
+
+        PseudoPot. # 1 for Ba read from file:
+        /path/to/Ba_ONCV_PBE-1.0.upf
+        MD5 check sum: e597b880c13c16463245d39d15e4590c
+        Pseudo is Norm-conserving, Zval = 10.0
+
+    Each Zval is matched to its element by position - it is the Zval line
+    lying between this element's line and the next element's - rather than
+    by a fixed offset from the element line. The block is not a fixed
+    height: the MD5 line is absent in older QE versions, which shifts Zval
+    up by one.
+    """
     zval_pattern = {'element': 'for\\s+(\\w+)\\s+read\\sfrom\\sfile',
                 'zval': 'Zval\\s+=\\s+([\\d+\\.]+)\\s'}
-    
+
     pw_out.read_pattern(zval_pattern)
     pw_out_data = pw_out.data
-    
+
+    elements = pw_out_data.get('element') or []
+    zvals = pw_out_data.get('zval') or []
+
+    if not elements:
+        raise ValueError(
+            f"no pseudopotential blocks found in {pw_out.filename}; it may be "
+            f"truncated, or from a run that did not reach the banner"
+        )
+
+    if len(elements) != len(zvals):
+        raise ValueError(
+            f"{pw_out.filename} has {len(elements)} pseudopotential blocks but "
+            f"{len(zvals)} Zval lines; every species must report a valence charge"
+        )
+
     zval_dict = {}
-    for entry in pw_out_data['element']:
-        element = entry[0][0]
-        line_num = entry[1]
-        for zvals in pw_out_data['zval']:
-            if zvals[1] == line_num+3:
-                zval = float(zvals[0][0])
+    for index, (element_entry, zval_entry) in enumerate(zip(elements, zvals)):
+        element, element_line = element_entry[0][0], element_entry[1]
+        zval, zval_line = float(zval_entry[0][0]), zval_entry[1]
+
+        # The pairing is only trustworthy if this Zval falls inside this
+        # element's block, so check it rather than assume the order holds.
+        next_element_line = (elements[index + 1][1]
+                             if index + 1 < len(elements) else float('inf'))
+
+        if not element_line < zval_line < next_element_line:
+            raise ValueError(
+                f"in {pw_out.filename}, the Zval on line {zval_line + 1} does not "
+                f"fall inside the block for {element} starting on line "
+                f"{element_line + 1}; the pseudopotential output could not be "
+                f"read reliably"
+            )
+
         zval_dict[element] = zval
-        
+
     return zval_dict
 
 
@@ -232,11 +274,19 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
     
     pol_struct = get_struct_from_qeschema(pol_xml_data)
     np_struct = get_struct_from_qeschema(np_xml_data)
-    
-    kpoint_list = get_kpt_list_from_qeschema(pol_xml_data)
-    # round k-point list so can find matching k-points
-    kpoint_list = [np.around(kpt, 6) for kpt in kpoint_list]
-    
+    utils.check_species_match(pol_struct, np_struct)
+
+    # round k-point lists so can find matching k-points
+    kpoint_list = [np.around(kpt, 6)
+                   for kpt in get_kpt_list_from_qeschema(pol_xml_data)]
+    np_kpoint_list = [np.around(kpt, 6)
+                      for kpt in get_kpt_list_from_qeschema(np_xml_data)]
+
+    # Only the polar list is carried forward, so the two runs must agree.
+    utils.check_kpoints_match(kpoint_list, np_kpoint_list)
+    utils.check_full_bz(kpoint_list)
+
+
     pw_out = PWOutput(pw_out_path)
     zval_dict = get_zval_dict_from_PWOutput(pw_out)
     spin_pol_pol = get_spin_pol_from_qeschema(pol_xml_data)
@@ -253,7 +303,9 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
         np_max_band_fill_up, np_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(np_xml_data, FILLING_TOL)
         if (pol_max_band_fill_up != np_max_band_fill_up or
             pol_max_band_fill_dw != np_max_band_fill_dw):
-            print("CAUTION: max band filling for polar and non-polar structures are not the same")
+            logger.warning("max band filling differs between the polar (up %s, down %s) and non-polar (up %s, down %s) runs; using the smaller of each",
+                           pol_max_band_fill_up, pol_max_band_fill_dw,
+                           np_max_band_fill_up, np_max_band_fill_dw)
         common_max_band_fill_up = np.min([pol_max_band_fill_up,
                                           np_max_band_fill_up])
         common_max_band_fill_dw = np.min([pol_max_band_fill_dw,
@@ -264,7 +316,8 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
         pol_max_band_fill = get_band_filling_from_qeschema_nospin(pol_xml_data,
                                                                   FILLING_TOL)
         if pol_max_band_fill != np_max_band_fill:
-            print("CAUTION: max band filling for polar and non-polar structures are not the same")
+            logger.warning("max band filling differs between the polar (%s) and non-polar (%s) runs; using the smaller",
+                           pol_max_band_fill, np_max_band_fill)
         common_max_band_fill = np.min([pol_max_band_fill, np_max_band_fill])
 
     if spin_pol:

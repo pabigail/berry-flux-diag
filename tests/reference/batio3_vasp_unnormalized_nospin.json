@@ -1,0 +1,48 @@
+{
+  "code": "VASP_unnormalized",
+  "system": "BaTiO3, non-spin-polarized",
+  "warning": "NOT a physical polarization: the PAW augmentation terms are missing. This fixture exists only to detect unintended changes in the no-pawpyseed code path.",
+  "inputs": {
+    "pol_dir": "/Users/abbypoteshman/Dropbox/NeatonGroup/automate_pol_calcs/manual_workflow_to_automate/BaTiO3_files/launcher_2025-07-07-22-45-50-197333",
+    "np_dir": "/Users/abbypoteshman/Dropbox/NeatonGroup/automate_pol_calcs/manual_workflow_to_automate/BaTiO3_files/launcher_2025-07-07-22-44-09-469181",
+    "note": "WAVECAR/POTCAR are not committed; point the test at these directories with BFD_VASP_BATIO3_POL / BFD_VASP_BATIO3_NP."
+  },
+  "provenance": {
+    "captured_at": "2026-09-22T19:14:21+00:00",
+    "git_sha": "0909fb76202eeb898e3f88578f0d6dc2415369c4",
+    "git_dirty": true,
+    "python": "3.12.8",
+    "numpy": "2.2.4",
+    "pymatgen": "2025.1.9"
+  },
+  "polarization_norm": 44.78445071151653,
+  "string_sums": [
+    -5.838868819194095e-05,
+    -7.142983259447074e-05,
+    2.9024780232347114
+  ],
+  "string_lens": [
+    36,
+    36,
+    36
+  ],
+  "num_kpoints": 216,
+  "spin_polarized": false,
+  "zval_dict": {
+    "Ba": 10.0,
+    "Ti": 12.0,
+    "O": 6.0
+  },
+  "pol_formula": "BaTiO3",
+  "pol_lattice_abc": [
+    4.002006,
+    4.002006,
+    4.215507
+  ],
+  "np_lattice_abc": [
+    4.035583,
+    4.035583,
+    4.035583
+  ],
+  "band_fill": 20
+}

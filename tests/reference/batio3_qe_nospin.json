@@ -1,0 +1,45 @@
+{
+  "code": "QE",
+  "system": "BaTiO3, non-spin-polarized",
+  "inputs": {
+    "source": "tests/BaTiO3_QE_IO_nospin (in repo)"
+  },
+  "provenance": {
+    "captured_at": "2026-09-22T21:15:36+00:00",
+    "git_sha": "7c9094ed405e9d7fd4b0d51655b1e69e7b372e55",
+    "git_dirty": true,
+    "python": "3.12.8",
+    "numpy": "2.2.4",
+    "pymatgen": "2025.1.9"
+  },
+  "polarization_norm": 45.5058688668633,
+  "string_sums": [
+    -0.000256299558765218,
+    -0.00025870418998783716,
+    0.717316947426289
+  ],
+  "string_lens": [
+    25,
+    25,
+    25
+  ],
+  "num_kpoints": 125,
+  "spin_polarized": false,
+  "zval_dict": {
+    "Ba": 10.0,
+    "O": 6.0,
+    "Ti": 12.0
+  },
+  "pol_formula": "BaTiO3",
+  "pol_lattice_abc": [
+    4.001191997285544,
+    4.001191997285544,
+    4.215096997140429
+  ],
+  "np_lattice_abc": [
+    4.001191997285544,
+    4.001191997285544,
+    4.215096997140429
+  ],
+  "band_fill": 20
+}

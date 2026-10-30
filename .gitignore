@@ -19,6 +19,15 @@ dist/
 .eggs/
 
 # -----------------------------
+# Test / coverage artifacts
+# -----------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# -----------------------------
 # Jupyter Notebook junk
 # -----------------------------
 .ipynb_checkpoints/

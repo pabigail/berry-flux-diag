@@ -1,23 +1,20 @@
 from jobflow import job, Flow, Response
 import berry_flux_diag as bfd
-from bfd import preprocess
+from berry_flux_diag.constants import E_PER_ANG2_TO_MUC_PER_CM2
+from berry_flux_diag import preprocess
 import numpy as np
 import os
 from monty.serialization import dumpfn
 from pymatgen.core import Structure
-from pymatgen.io.vasp.sets import MPStaticSet
 from pymatgen.io.vasp.inputs import Kpoints
 from atomate2.vasp.jobs.core import StaticMaker
-from atomate2.vasp.jobs.base import BaseVaspMaker
 from atomate2.vasp.sets.core import StaticSetGenerator
 from atomate2.vasp.powerups import update_user_incar_settings, update_user_kpoints_settings
 from typing import List
-from dataclasses import field
 from pathlib import Path
 import gzip
 import shutil
 from pymatgen.util.coord_cython import pbc_shortest_vectors
-import re
 
 
 def convert_complex(obj):
@@ -85,9 +82,7 @@ def compute_elec_contrib(string_sums, string_lens, pol_struct: Structure, occ_fa
     a, b, c = lattice.a, lattice.b, lattice.c
     vol = lattice.volume
 
-    # Physical constants
-    ECHARGE = 1.6021766e-19  # C
-    scaling = 100 * ECHARGE * 1e20 / vol  # convert to μC/cm²
+    scaling = E_PER_ANG2_TO_MUC_PER_CM2 / vol  # convert to μC/cm²
 
     # Project onto lattice vectors
     elec_contrib = scaling * np.array([
@@ -110,14 +105,6 @@ def calc_ionic(frac_coord, structure: Structure, zval: float) -> np.ndarray:
     """
     norms = structure.lattice.lengths
     return np.multiply(norms, -np.array(frac_coord) * zval)
-
-
-def extract_letters(input_string):
-    # Use a regular expression to match only the letters at the beginning of the string
-    match = re.match(r'^[A-Za-z]+', input_string)
-    if match:
-        return match.group(0)
-    return ''
 
 
 def compute_ionic_contrib(pol_struct: Structure, np_struct: Structure, zval_dict: dict):
@@ -147,56 +134,38 @@ def compute_ionic_contrib(pol_struct: Structure, np_struct: Structure, zval_dict
     # Compute ionic dipole contribution per site
     tot_ionic = []
     for site, d_frac in zip(pol_struct, frac_coords_diff):
-        element = extract_letters(str(site.specie))
+        element = bfd.utils.extract_letters(str(site.specie))
         zval = zval_dict[element]
         tot_ionic.append(calc_ionic(d_frac, pol_struct, zval))  # electron·Å
 
     ion_diff = np.sum(tot_ionic, axis=0)  # electron·Å
 
-    # Convert to μC/cm²
-    e_to_muC = -1.6021766e-13  # electron·Å⁻² to μC/cm²
-    scale = e_to_muC * 1e16 / pol_struct.lattice.volume  # 1e16 for Å² to cm²
+    # Convert to μC/cm². Negative because calc_ionic already returns -z*dr.
+    scale = -E_PER_ANG2_TO_MUC_PER_CM2 / pol_struct.lattice.volume
     ionic_contrib = scale * ion_diff  # μC/cm²
 
     return ionic_contrib
 
 
 @job
-def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True, num_interps='auto', max_disp=0.3):
+def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True,
+                       num_interps='auto', max_disp=0.3):
+    """Jobflow wrapper around preprocess.preprocess_POSCARS.
 
-    structs = []
-    
-    # find translation that minimizes max atomic displacement between pol and np structs
-    if translate:
-        pol_orig_struct, np_trans_struct, orig_max_disp, translation = preprocess.translate_poscars(pol_orig_POSCAR_file,
-                                                                                               np_orig_POSCAR_file)
-    else:
-        pol_orig_struct = Structure.from_file(pol_orig_POSCAR_file)
-        np_trans_struct = Structure.from_file(np_orig_POSCAR_file) 
+    This used to reimplement that function rather than call it, and the
+    copy had drifted: it called preprocess.translate_poscars, which does
+    not exist, so the default path raised AttributeError; and with
+    translate=False it left orig_max_disp and translation unbound, so that
+    path raised UnboundLocalError a few lines later. Neither could have
+    run. Delegating keeps the interpolation logic in one place, and in the
+    module that can be imported and tested without atomate2.
+    """
+    return preprocess.preprocess_POSCARS(pol_orig_POSCAR_file,
+                                         np_orig_POSCAR_file,
+                                         translate=translate,
+                                         num_interps=num_interps,
+                                         max_disp=max_disp)
 
-    # compute number of interpolated structures to ensure max atomic distance is below max_disp if num_interps not specified
-    if num_interps == 'auto':
-        num_interps = int(np.ceil(orig_max_disp/max_disp))
-    elif not isinstance(num_interps, int) or num_interps < 0:
-        raise TypeError("num_interps must be a non-negative integer or the string 'auto'")
-
-    # get interpolated structures if necessary
-    if orig_max_disp > max_disp:
-        structs = pol_orig_struct.interpolate(np_trans_struct, num_interps, interpolate_lattices=True)
-    else:
-        structs = [pol_orig_struct, np_trans_struct]
-
-    adj_max_disp = preprocess.max_atomic_displacement_between_adjacent_structs(structs)
-    
-    return {
-        "pol_orig_struct": pol_orig_struct,
-        "np_orig_struct": Structure.from_file(np_orig_POSCAR_file),
-        "np_trans_struct": np_trans_struct,
-        "structs": structs, 
-        "orig_max_disp": orig_max_disp, 
-        "adj_max_disp": adj_max_disp,
-        "translation": translation
-    }
 
 @job
 def scf_with_fixed_kpoints(
@@ -239,7 +208,7 @@ def scf_with_fixed_kpoints(
         if i == 0:
             fw.append_name("_scf_pol")
         elif i == len(structures)-1:
-            fw.append_name("scf_np")
+            fw.append_name("_scf_np")
         else:
             fw.append_name(f"_scf_{i}")
         jobs.append(fw)
@@ -279,7 +248,7 @@ def get_string_sums_from_VASP(pol_dir: str, np_dir: str) -> Response:
     np_POSCAR_file = ensure_unzipped(np_dir/"POSCAR")
     pol_wavecar = ensure_unzipped(pol_dir/"WAVECAR")
     np_wavecar = ensure_unzipped(np_dir/"WAVECAR")
-    potcar_file = ensure_unzipped(np_dir/"POTCAR")
+    # Both runs use the same POTCAR; the polar one is the one passed on.
     potcar_file = ensure_unzipped(pol_dir/"POTCAR")
     pol_OUTCAR = ensure_unzipped(pol_dir/"OUTCAR")
     np_OUTCAR = ensure_unzipped(np_dir/"OUTCAR")
@@ -323,7 +292,7 @@ def make_string_sum_jobs(vasp_dirs: List[str]) -> Response:
         pol_dir = vasp_dirs[i]
         np_dir = vasp_dirs[i+1]
         job_i = get_string_sums_from_VASP(pol_dir, np_dir)
-        job_i.append_name(f"string_sum_{i}")
+        job_i.append_name(f"_string_sum_{i}")
         jobs.append(job_i)
 
     return Response(replace=Flow(jobs), output={"string_sum_outputs": [j.output for j in jobs]})
@@ -376,6 +345,9 @@ def bfd_schema(preprocess_output,
         "np_trans_struct": preprocess_output["np_trans_struct"],
         "structs": preprocess_output["structs"],
         "orig_max_disp": preprocess_output["orig_max_disp"],
+        # The displacement after translation, which is what the number of
+        # interpolated images was actually decided from.
+        "trans_max_disp": preprocess_output["trans_max_disp"],
         "adj_max_disp": preprocess_output["adj_max_disp"],
         "translation": preprocess_output["translation"],
         "kpoints": scf_output["kpoints"],
