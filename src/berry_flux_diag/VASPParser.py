@@ -1,4 +1,5 @@
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from pymatgen.core.structure import Structure
@@ -46,20 +47,56 @@ logger = logging.getLogger(__name__)
 # capture went from about 2 to about 8 minutes, peaking at 5 GB.
 MOMENTUM_ENCUT = None
 
-def get_band_filling_from_wavecar_nospin(wavecar, tol):
+def read_nelect(vasprun_file):
+    """NELECT from a vasprun.xml, without parsing the rest of the file.
 
-    num_kpoints = np.array(wavecar.band_energy).shape[0]
-    occupations = (wavecar.band_energy[kpt][:, 2] for kpt in range(num_kpoints))
+    It is near the top, in the parameters block, and in the incar block too
+    when it was set by hand; both hold the value the run used.
+    """
+    pattern = re.compile(r'<i[^>]*name="NELECT"[^>]*>\s*([^<\s]+)\s*</i>')
+    with open(vasprun_file) as f:
+        for line in f:
+            match = pattern.search(line)
+            if match:
+                return float(match.group(1))
+    raise ValueError(f"no NELECT in {vasprun_file}")
 
-    return utils.max_filled_bands(occupations, tol)
 
-def get_band_filling_from_wavecar_spinpol(wavecar, tol, spin_channel):
+def wavecar_band_arrays(wavecar):
+    """(energies, occupations) for each spin channel, each (nk, nbands).
 
-    num_kpoints = np.array(wavecar.band_energy).shape[1]
-    occupations = (wavecar.band_energy[spin_channel][kpt][:, 2]
-                   for kpt in range(num_kpoints))
+    Works on a paw.WavecarHeader or a pymatgen Wavecar, which lay out
+    band_energy the same way: per k-point rows of (E, Im E, occupation),
+    nested one level deeper per spin channel when there are two.
+    """
+    channels = [wavecar.band_energy] if wavecar.spin == 1 else wavecar.band_energy
+    arrays = []
+    for band_energy in channels:
+        band_energy = np.array(band_energy)
+        arrays.append((band_energy[:, :, 0], band_energy[:, :, 2]))
+    return arrays
 
-    return utils.max_filled_bands(occupations, tol)
+
+def get_band_filling_from_wavecar_nospin(wavecar, nelect, label=""):
+    """Occupied bands in a non-spin-polarized run: NELECT / 2, checked
+    against the occupations by utils.occupied_band_count."""
+    (energies, occupations), = wavecar_band_arrays(wavecar)
+    return utils.occupied_band_count(nelect / 2, energies, occupations, label)
+
+
+def get_band_filling_from_wavecar_spinpol(wavecar, nelect, label=""):
+    """Occupied bands in each channel of a collinear spin-polarized run.
+
+    Returns
+    -------
+    (int, int)
+        Up and down.
+    """
+    (e_up, o_up), (e_down, o_down) = wavecar_band_arrays(wavecar)
+    n_up, n_down = utils.spin_channel_electrons(nelect, o_up, o_down, label)
+    prefix = f"{label}, " if label else ""
+    return (utils.occupied_band_count(n_up, e_up, o_up, prefix + "spin up"),
+            utils.occupied_band_count(n_down, e_down, o_down, prefix + "spin down"))
 
 
 
@@ -159,21 +196,6 @@ def paw_wfcn_dict(wavecar_file, potcar_file, vasprun_file, max_band_fill,
     return wfcn_dict
 
 
-def get_band_filling_from_outcar(outcar, spin_pol, occ_tol=1e-6):
-    # outcar is a pymatgen.io.vasp.outputs Outcar object
-    outcar.read_eigenval()
-    
-    if spin_pol:
-        occ_up = np.array(outcar.occupancies[0])
-        occ_down = np.array(outcar.occupancies[1])
-        fill_up = np.sum(occ_up[0] > occ_tol)
-        fill_down = np.sum(occ_down[0] > occ_tol)
-        return int(fill_up), int(fill_down)
-    else:
-        occ = np.array(outcar.occupancies)
-        fill = np.sum(occ[0] > occ_tol)
-        return int(fill)
-
 def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
                 pol_directory, np_directory, momentum_encut=MOMENTUM_ENCUT):
    
@@ -225,19 +247,20 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
     utils.check_kpoints_match(kpoint_list, np_kpoint_list)
     utils.check_full_bz(kpoint_list)
 
-    TOL = 1e-6    
+    # The occupied bands are counted from the electron count, not from the
+    # occupations: see utils.occupied_band_count for why.
+    pol_nelect = read_nelect(pol_vasprun)
+    np_nelect = read_nelect(np_vasprun)
 
     if spin_pol:
-        spin_up = 0
-        spin_down = 1
-        pol_band_fill_up = get_band_filling_from_wavecar_spinpol(pol_wavecar, TOL, spin_up)
-        pol_band_fill_down = get_band_filling_from_wavecar_spinpol(pol_wavecar, TOL, spin_down)
-        np_band_fill_up = get_band_filling_from_wavecar_spinpol(np_wavecar, TOL, spin_up)
-        np_band_fill_down = get_band_filling_from_wavecar_spinpol(np_wavecar, TOL, spin_down)
+        pol_band_fill_up, pol_band_fill_down = get_band_filling_from_wavecar_spinpol(
+            pol_wavecar, pol_nelect, "polar")
+        np_band_fill_up, np_band_fill_down = get_band_filling_from_wavecar_spinpol(
+            np_wavecar, np_nelect, "non-polar")
     else:
-        pol_band_fill = get_band_filling_from_wavecar_nospin(pol_wavecar, TOL)
-        np_band_fill = get_band_filling_from_wavecar_nospin(np_wavecar, TOL)
-        logger.info('max_band_fill: polar %s, non-polar %s', pol_band_fill, np_band_fill)
+        pol_band_fill = get_band_filling_from_wavecar_nospin(pol_wavecar, pol_nelect, "polar")
+        np_band_fill = get_band_filling_from_wavecar_nospin(np_wavecar, np_nelect, "non-polar")
+        logger.info('occupied bands: polar %s, non-polar %s', pol_band_fill, np_band_fill)
     
     # The two reconstructions are independent, so run them side by side.
     # Threads rather than processes: most of the time is in NumPy and BLAS,
