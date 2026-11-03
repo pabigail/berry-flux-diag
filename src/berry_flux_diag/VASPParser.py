@@ -100,7 +100,16 @@ def get_band_filling_from_wavecar_spinpol(wavecar, nelect, label=""):
 
 
 
-# only works for non-spin-polarized wavefunctions...
+def _band_fills_per_channel(max_band_fill):
+    """[band count] for a non-spin run, or [up, down] for a spin-polarized one."""
+    if np.ndim(max_band_fill) == 0:
+        return [int(max_band_fill)]
+    fills = [int(n) for n in max_band_fill]
+    if len(fills) != 2:
+        raise ValueError(f"expected one band count or an (up, down) pair, got {max_band_fill}")
+    return fills
+
+
 def get_paw_wfcn_data(wavecar_file, potcar_file, vasprun_file,
                       max_band_fill, momentum_encut=MOMENTUM_ENCUT):
     """PAW-reconstructed coefficients on a k-independent momentum grid.
@@ -110,6 +119,10 @@ def get_paw_wfcn_data(wavecar_file, potcar_file, vasprun_file,
 
     Parameters
     ----------
+    max_band_fill : int or (int, int)
+        Bands to reconstruct: one count for a non-spin-polarized WAVECAR, or
+        (up, down) for a spin-polarized one. Which it is must match the
+        WAVECAR.
     momentum_encut : float or None
         Plane-wave cutoff in eV defining the momentum grid. Defaults to
         MOMENTUM_ENCUT, which is None: four times the run's ENCUT, the
@@ -122,9 +135,16 @@ def get_paw_wfcn_data(wavecar_file, potcar_file, vasprun_file,
     gpoints : (ngpoints, 3) int array
     ngpoints : int
     wfc_data : (max_band_fill, nkpts, ngpoints) complex array
+        For a spin-polarized run, a list of two of these, up and down, each
+        with its own band count.
     """
+    fills = _band_fills_per_channel(max_band_fill)
     wf = paw.Wavefunction.from_files(wavecar_file, potcar_file, vasprun_file,
-                                     nbands=max_band_fill)
+                                     nbands=max(fills))
+    if wf.nspin != len(fills):
+        raise ValueError(
+            f"{wavecar_file} has {wf.nspin} spin channel(s), but band counts "
+            f"were given for {len(fills)}")
 
     # Report the cutoff against the 4 x ENCUT default, so that a cutoff passed
     # in too small for the run says so at the time it is used rather than only
@@ -150,12 +170,15 @@ def get_paw_wfcn_data(wavecar_file, potcar_file, vasprun_file,
 
     gpoints = mm.momentum_grid
     ngpoints = len(gpoints)
-    wfc_data = np.zeros((max_band_fill, wf.nwk, ngpoints), dtype=complex)
+    wfc_data = [np.zeros((n, wf.nwk, ngpoints), dtype=complex) for n in fills]
 
+    # Spin channels innermost: the augmentation basis depends only on k, and
+    # MomentumMatrix keeps the last one, so both channels share it.
     for kpt_idx in range(wf.nwk):
-        wfc_data[:, kpt_idx, :] = mm.get_reciprocal_fullfw_kpoint(kpt_idx, max_band_fill)
+        for spin, n in enumerate(fills):
+            wfc_data[spin][:, kpt_idx, :] = mm.get_reciprocal_fullfw_kpoint(kpt_idx, n, spin)
 
-    return gpoints, ngpoints, wfc_data
+    return gpoints, ngpoints, wfc_data if wf.nspin == 2 else wfc_data[0]
 
 def paw_wfcn_dict(wavecar_file, potcar_file, vasprun_file, max_band_fill,
                   kpoint_list, momentum_encut=MOMENTUM_ENCUT):
@@ -167,6 +190,8 @@ def paw_wfcn_dict(wavecar_file, potcar_file, vasprun_file, max_band_fill,
         wavecar_file (str): Path to WAVECAR
         potcar_file (str): Path to POTCAR
         vasprun_file (str): Path to vasprun.xml
+        max_band_fill (int or (int, int)): bands to reconstruct, per spin
+            channel for a spin-polarized run. See get_paw_wfcn_data.
         kpoint_list (List[np.ndarray]): List of k-points (fractional coordinates)
         momentum_encut (float, None): momentum grid cutoff in eV; defaults
             to MOMENTUM_ENCUT, and None means 4 x ENCUT.
@@ -174,6 +199,8 @@ def paw_wfcn_dict(wavecar_file, potcar_file, vasprun_file, max_band_fill,
 
     Returns:
         dict: {kpt (tuple): {'wfcn': array(nbands, ngpoints), 'gvecs': array(ngpoints, 3)}}
+        For a spin-polarized run 'wfcn' is a list [up, down] of such arrays,
+        as QEParser gives and Overlaps reads.
     """
     gvecs, ngpoints, wfc_data = get_paw_wfcn_data(
         wavecar_file, potcar_file, vasprun_file, max_band_fill,
@@ -185,8 +212,11 @@ def paw_wfcn_dict(wavecar_file, potcar_file, vasprun_file, max_band_fill,
     wfcn_dict = {}
 
     for kpt_idx in range(nkpts):
-        # Get wavefunction coefficients for this k-point (shape: nbands, ngpoints)
-        wfcn = wfc_data[:, kpt_idx, :]  # shape: (nbands, ngpoints)
+        # Coefficients for this k-point, (nbands, ngpoints) per spin channel
+        if isinstance(wfc_data, list):
+            wfcn = [channel[:, kpt_idx, :] for channel in wfc_data]
+        else:
+            wfcn = wfc_data[:, kpt_idx, :]
         coeff_gvec_dict = {
             'wfcn': wfcn,
             'gvecs': gvecs  # the momentum grid is the same for every k-point
@@ -257,11 +287,26 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
             pol_wavecar, pol_nelect, "polar")
         np_band_fill_up, np_band_fill_down = get_band_filling_from_wavecar_spinpol(
             np_wavecar, np_nelect, "non-polar")
+        pol_fill = (pol_band_fill_up, pol_band_fill_down)
+        np_fill = (np_band_fill_up, np_band_fill_down)
     else:
         pol_band_fill = get_band_filling_from_wavecar_nospin(pol_wavecar, pol_nelect, "polar")
         np_band_fill = get_band_filling_from_wavecar_nospin(np_wavecar, np_nelect, "non-polar")
-        logger.info('occupied bands: polar %s, non-polar %s', pol_band_fill, np_band_fill)
-    
+        pol_fill, np_fill = pol_band_fill, np_band_fill
+    logger.info('occupied bands%s: polar %s, non-polar %s',
+                ' (up, down)' if spin_pol else '', pol_fill, np_fill)
+
+    # Both runs are reconstructed to the bands they have in common, per spin
+    # channel, as QEParser reads them: Overlaps uses no more than that.
+    if pol_fill != np_fill:
+        logger.warning("occupied bands differ between the polar %s and non-polar "
+                       "%s runs; using the smaller", pol_fill, np_fill)
+    if spin_pol:
+        common_fill = tuple(min(p, n) for p, n in zip(pol_fill, np_fill))
+    else:
+        common_fill = min(pol_fill, np_fill)
+
+
     # The two reconstructions are independent, so run them side by side.
     # Threads rather than processes: most of the time is in NumPy and BLAS,
     # which release the GIL, and a process would have to send its ~1.5 GB of
@@ -270,10 +315,10 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
     # result() re-raises anything either one raised.
     with ThreadPoolExecutor(max_workers=2) as pool:
         pol_future = pool.submit(paw_wfcn_dict, pol_WAVECAR, POTCAR, pol_vasprun,
-                                 pol_band_fill, kpoint_list,
+                                 common_fill, kpoint_list,
                                  momentum_encut=momentum_encut)
         np_future = pool.submit(paw_wfcn_dict, np_WAVECAR, POTCAR, np_vasprun,
-                                np_band_fill, kpoint_list,
+                                common_fill, kpoint_list,
                                 momentum_encut=momentum_encut)
         pol_wfcn_dict_paw = pol_future.result()
         np_wfcn_dict_paw = np_future.result()
