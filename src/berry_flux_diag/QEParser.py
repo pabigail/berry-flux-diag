@@ -73,14 +73,23 @@ def get_spin_pol_from_qeschema(xml_data):
 
 
 def get_kpt_list_from_qeschema(xml_data):
-    
-    ks_energies = xml_data['qes:espresso']['output']['band_structure']['ks_energies']
-    
-    kpoint_list = []
-    for kpt in ks_energies:
-        kpoint_list.append(np.array(kpt['k_point']['$']))
-        
-    return kpoint_list
+    """The run's k-points in crystal (fractional reciprocal) coordinates.
+
+    QE writes them in Cartesian units of 2 pi / alat. Those used to be passed
+    on as they were, while VASP's are fractional. For an orthogonal cell the
+    strings came out the same either way, but symmetry operations act on
+    fractional coordinates, and two runs with different cells hold the same
+    mesh at different Cartesian points.
+
+    k_i = k . a_i / alat, with k in 2 pi / alat and a_i in bohr.
+    """
+    output = xml_data['qes:espresso']['output']
+    cell = output['atomic_structure']['cell']
+    alat = output['atomic_structure']['@alat']
+    to_crystal = np.array([cell['a1'], cell['a2'], cell['a3']]).T / alat
+
+    ks_energies = output['band_structure']['ks_energies']
+    return [np.array(kpt['k_point']['$']) @ to_crystal for kpt in ks_energies]
 
 
 def _band_arrays_from_qeschema(xml_data):
