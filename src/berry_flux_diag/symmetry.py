@@ -26,12 +26,15 @@ each spin channel onto the other, not onto itself.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
 import spglib
 
 from berry_flux_diag import utils
+
+logger = logging.getLogger(__name__)
 
 # spglib's tolerance, in Angstrom. Coordinates like 0.499999 in a 4 A cell
 # are 4e-6 A off the symmetric position, so this has room to spare, and is
@@ -332,7 +335,90 @@ def unfold_wfcn_dict(wfcn_dict, ibz_kpoints, kmap, k_rotations, translations):
         args = (k, k_rotations[o], translations[o], bool(kmap.time_reversal[j]), kmap.gshift[j])
         channels = entry["wfcn"] if isinstance(entry["wfcn"], list) else [entry["wfcn"]]
         unfolded = [unfold_state(c, entry["gvecs"], *args) for c in channels]
-        wfcn = [c for c, _ in unfolded]
+        wfcn, gvecs = [c for c, _ in unfolded], unfolded[0][1]
+        perm = _permutation_onto(gvecs, entry["gvecs"])
+        if perm is not None:
+            wfcn, gvecs = [c[:, perm] for c in wfcn], entry["gvecs"]
         full[tuple(kfull)] = {"wfcn": wfcn if isinstance(entry["wfcn"], list) else wfcn[0],
-                              "gvecs": unfolded[0][1]}
+                              "gvecs": gvecs}
     return full
+
+
+def _permutation_onto(gvecs, reference):
+    """perm with gvecs[perm] == reference, if the two hold the same plane
+    waves; else None.
+
+    A rotation without a G0 shift only reorders a G set that is closed
+    under it, as VASP's k-independent momentum grid is. Putting the
+    unfolded coefficients back in the reference order keeps every k-point
+    on literally the same G list, which Overlaps compares directly rather
+    than remapping. The values are unchanged; only the column order is."""
+    if gvecs.shape != reference.shape:
+        return None
+    order_g, order_r = np.lexsort(gvecs.T), np.lexsort(reference.T)
+    if not np.array_equal(gvecs[order_g], reference[order_r]):
+        return None
+    perm = np.empty_like(order_g)
+    perm[order_r] = order_g
+    return perm
+
+
+def is_full_mesh(kpoints):
+    """Whether the k-points are a regular mesh over the whole zone
+    (utils.check_full_bz's test), rather than an IBZ to unfold."""
+    try:
+        utils.check_full_bz(kpoints)
+    except ValueError:
+        return False
+    return True
+
+
+class IBZUnfolding:
+    """What a parser needs to unfold one polar / non-polar pair of IBZ runs.
+
+    Parameters
+    ----------
+    pol_struct, np_struct : Structure
+    ibz_kpoints : (n_ibz, 3)
+        The runs' common k-points, unrounded, as the polar DFT run wrote
+        them; the wavefunction dictionaries are keyed by these rounded.
+    pol_magmoms, np_magmoms : sequence of float, optional
+        Collinear moment per atom, for a spin-polarized run.
+    weights : sequence of float, optional
+        The k-point weights the DFT run used. They must be proportional to
+        the multiplicities the shared symmetry gives, or the list was
+        reduced with other operations.
+    """
+
+    def __init__(self, pol_struct, np_struct, ibz_kpoints, pol_magmoms=None,
+                 np_magmoms=None, weights=None):
+        self.ibz_kpoints = np.asarray(ibz_kpoints, dtype=float)
+        self.symmetry = shared_symmetry(pol_struct, np_struct, pol_magmoms, np_magmoms)
+        self.kmap = unfold_kpoints(self.ibz_kpoints, self.symmetry.k_rotations)
+        mult = self.kmap.multiplicity / self.kmap.multiplicity.sum()
+        if weights is not None:
+            w = np.asarray(weights, dtype=float)
+            if len(w) != len(mult) or not np.allclose(w / w.sum(), mult, rtol=0, atol=1e-6):
+                raise ValueError(
+                    "the k-point weights of the DFT run do not match the multiplicities "
+                    "of the symmetry the polar and non-polar structures share, so the "
+                    "IBZ list was reduced with other operations: generate it with "
+                    "symmetry.reduce_mesh")
+        logger.info("IBZ: %d k-points unfold to a %d-point mesh with %d operations "
+                    "shared by %s and %s", len(self.ibz_kpoints), len(self.kmap.full_kpoints),
+                    len(self.symmetry), self.symmetry.space_groups["pol"],
+                    self.symmetry.space_groups["np"])
+
+    @property
+    def weights(self):
+        """Each IBZ point's share of the zone, for averages over k."""
+        return self.kmap.multiplicity / self.kmap.multiplicity.sum()
+
+    @property
+    def full_kpoints(self):
+        return [np.array(k) for k in self.kmap.full_kpoints]
+
+    def unfold(self, wfcn_dict, label):
+        """label is "pol" or "np": each run is unfolded with its own translations."""
+        return unfold_wfcn_dict(wfcn_dict, self.ibz_kpoints, self.kmap,
+                                self.symmetry.k_rotations, self.symmetry.translations[label])

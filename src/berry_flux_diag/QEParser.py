@@ -5,6 +5,7 @@ from pymatgen.io.pwscf import PWOutput
 import qeschema
 import h5py
 import numpy as np
+import berry_flux_diag.symmetry as symmetry
 import berry_flux_diag.utils as utils
 from berry_flux_diag.constants import BOHR_TO_ANGSTROM
 
@@ -101,14 +102,33 @@ def _band_arrays_from_qeschema(xml_data):
     return band_struct_dict, float(band_struct_dict['nelec']), energies, occupations
 
 
-def get_band_filling_from_qeschema_nospin(xml_data, label=""):
+def get_kpoint_weights_from_qeschema(xml_data):
+    """The weight QE gave each k-point, in its order."""
+    ks_energies = xml_data['qes:espresso']['output']['band_structure']['ks_energies']
+    return [float(kpt['k_point']['@weight']) for kpt in ks_energies]
+
+
+def get_magmoms_from_qeschema(xml_data):
+    """Each atom's starting magnetization, from its species: the moments
+    the run's magnetic order is set up with, so unfolding uses only
+    operations that preserve them."""
+    species = xml_data['qes:espresso']['input']['atomic_species']['species']
+    if isinstance(species, dict):
+        species = [species]
+    start = {sp['@name']: float(sp.get('starting_magnetization') or 0.0) for sp in species}
+    atoms = xml_data['qes:espresso']['output']['atomic_structure']['atomic_positions']['atom']
+    return [start[atom['@name']] for atom in atoms]
+
+
+def get_band_filling_from_qeschema_nospin(xml_data, label="", weights=None):
     """Occupied bands in a non-spin-polarized run: nelec / 2, checked against
-    the occupations by utils.occupied_band_count."""
+    the occupations by utils.occupied_band_count. weights are the k-points'
+    shares of the zone, for an IBZ run."""
     _, nelec, energies, occupations = _band_arrays_from_qeschema(xml_data)
-    return utils.occupied_band_count(nelec / 2, energies, occupations, label)
+    return utils.occupied_band_count(nelec / 2, energies, occupations, label, weights)
 
 
-def get_band_filling_from_qeschema_spinpol(xml_data, label=""):
+def get_band_filling_from_qeschema_spinpol(xml_data, label="", weights=None):
     """Occupied bands in each channel of an LSDA run, as (up, down)."""
     band_struct_dict, nelec, energies, occupations = _band_arrays_from_qeschema(xml_data)
     nband_up = band_struct_dict['nbnd_up']
@@ -118,12 +138,12 @@ def get_band_filling_from_qeschema_spinpol(xml_data, label=""):
     up = slice(0, nband_up)
     dw = slice(nband_up, nband_up + nband_dw)
     n_up, n_dw = utils.spin_channel_electrons(
-        nelec, occupations[:, up], occupations[:, dw], label)
+        nelec, occupations[:, up], occupations[:, dw], label, weights)
     prefix = f"{label}, " if label else ""
     return (utils.occupied_band_count(n_up, energies[:, up], occupations[:, up],
-                                      prefix + "spin up"),
+                                      prefix + "spin up", weights),
             utils.occupied_band_count(n_dw, energies[:, dw], occupations[:, dw],
-                                      prefix + "spin down"))
+                                      prefix + "spin down", weights))
 
 
 def get_wavefunctions_hdf5(filename, start_band=None, stop_band=None):
@@ -294,15 +314,13 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
     utils.check_species_match(pol_struct, np_struct)
 
     # round k-point lists so can find matching k-points
-    kpoint_list = [np.around(kpt, 6)
-                   for kpt in get_kpt_list_from_qeschema(pol_xml_data)]
+    pol_kpoints = get_kpt_list_from_qeschema(pol_xml_data)
+    kpoint_list = [np.around(kpt, 6) for kpt in pol_kpoints]
     np_kpoint_list = [np.around(kpt, 6)
                       for kpt in get_kpt_list_from_qeschema(np_xml_data)]
 
     # Only the polar list is carried forward, so the two runs must agree.
     utils.check_kpoints_match(kpoint_list, np_kpoint_list)
-    utils.check_full_bz(kpoint_list)
-
 
     pw_out = PWOutput(pw_out_path)
     zval_dict = get_zval_dict_from_PWOutput(pw_out)
@@ -313,11 +331,23 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
         raise ValueError("two reference calculations have different spin-polarizations")
 
     spin_pol = spin_pol_pol
+
+    # A k-point list that is not a full mesh is taken as an IBZ, to be
+    # unfolded with the symmetry the two structures share. That must make a
+    # full mesh, or this raises.
+    ibz = None
+    if not symmetry.is_full_mesh(kpoint_list):
+        moments = ((get_magmoms_from_qeschema(pol_xml_data), get_magmoms_from_qeschema(np_xml_data))
+                   if spin_pol else (None, None))
+        ibz = symmetry.IBZUnfolding(pol_struct, np_struct, np.array(pol_kpoints), *moments,
+                                    weights=get_kpoint_weights_from_qeschema(pol_xml_data))
+    weights = None if ibz is None else ibz.weights
+
     # The occupied bands are counted from the electron count, not from the
     # occupations: see utils.occupied_band_count for why.
     if spin_pol:
-        pol_max_band_fill_up, pol_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(pol_xml_data, "polar")
-        np_max_band_fill_up, np_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(np_xml_data, "non-polar")
+        pol_max_band_fill_up, pol_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(pol_xml_data, "polar", weights)
+        np_max_band_fill_up, np_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(np_xml_data, "non-polar", weights)
         if (pol_max_band_fill_up != np_max_band_fill_up or
             pol_max_band_fill_dw != np_max_band_fill_dw):
             logger.warning("max band filling differs between the polar (up %s, down %s) and non-polar (up %s, down %s) runs; using the smaller of each",
@@ -329,9 +359,9 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
                                           np_max_band_fill_dw])
     else:
         np_max_band_fill = get_band_filling_from_qeschema_nospin(np_xml_data,
-                                                                 "non-polar")
+                                                                 "non-polar", weights)
         pol_max_band_fill = get_band_filling_from_qeschema_nospin(pol_xml_data,
-                                                                  "polar")
+                                                                  "polar", weights)
         if pol_max_band_fill != np_max_band_fill:
             logger.warning("max band filling differs between the polar (%s) and non-polar (%s) runs; using the smaller",
                            pol_max_band_fill, np_max_band_fill)
@@ -354,6 +384,11 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
                                                        kpoint_list,
                                                        common_max_band_fill)
     
+    if ibz is not None:
+        pol_wfcn_dict = ibz.unfold(pol_wfcn_dict, "pol")
+        np_wfcn_dict = ibz.unfold(np_wfcn_dict, "np")
+        kpoint_list = ibz.full_kpoints
+
     qe_parse_dict = utils.empty_parse_dict()
     qe_parse_dict['pol_struct'] = pol_struct
     qe_parse_dict['np_struct'] = np_struct

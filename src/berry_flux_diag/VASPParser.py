@@ -7,6 +7,7 @@ from pymatgen.io.vasp.outputs import Potcar
 from pymatgen.analysis.ferroelectricity.polarization import zval_dict_from_potcar
 import numpy as np
 import berry_flux_diag.paw as paw
+import berry_flux_diag.symmetry as symmetry
 import berry_flux_diag.utils as utils
 from pathlib import Path
 
@@ -62,6 +63,41 @@ def read_nelect(vasprun_file):
     raise ValueError(f"no NELECT in {vasprun_file}")
 
 
+def read_kpoint_weights(vasprun_file):
+    """The k-point weights from a vasprun.xml's kpoints block, unparsed
+    otherwise. None if there is no weights block."""
+    weights, inside = [], False
+    with open(vasprun_file) as f:
+        for line in f:
+            if '<varray name="weights"' in line:
+                inside = True
+            elif inside:
+                if "</varray>" in line:
+                    return weights
+                weights.append(float(re.search(r"<v>\s*([^<\s]+)", line).group(1)))
+    return None
+
+
+def read_magmoms(vasprun_file, natoms):
+    """The collinear MAGMOM a vasprun.xml records, one per atom, or None.
+
+    The first one in the file is the INCAR's when it was set, then the
+    parameters block's. VASP determines symmetry with these moments, so
+    unfolding uses only operations that preserve them.
+    """
+    pattern = re.compile(r'<v[^>]*name="MAGMOM"[^>]*>([^<]*)</v>')
+    with open(vasprun_file) as f:
+        for line in f:
+            match = pattern.search(line)
+            if match:
+                values = [float(v) for v in match.group(1).split()]
+                if len(values) != natoms:
+                    raise ValueError(f"MAGMOM in {vasprun_file} has {len(values)} values for "
+                                     f"{natoms} atoms; only collinear moments are supported")
+                return values
+    return None
+
+
 def wavecar_band_arrays(wavecar):
     """(energies, occupations) for each spin channel, each (nk, nbands).
 
@@ -77,14 +113,15 @@ def wavecar_band_arrays(wavecar):
     return arrays
 
 
-def get_band_filling_from_wavecar_nospin(wavecar, nelect, label=""):
+def get_band_filling_from_wavecar_nospin(wavecar, nelect, label="", weights=None):
     """Occupied bands in a non-spin-polarized run: NELECT / 2, checked
-    against the occupations by utils.occupied_band_count."""
+    against the occupations by utils.occupied_band_count. weights are the
+    k-points' shares of the zone, for an IBZ run."""
     (energies, occupations), = wavecar_band_arrays(wavecar)
-    return utils.occupied_band_count(nelect / 2, energies, occupations, label)
+    return utils.occupied_band_count(nelect / 2, energies, occupations, label, weights)
 
 
-def get_band_filling_from_wavecar_spinpol(wavecar, nelect, label=""):
+def get_band_filling_from_wavecar_spinpol(wavecar, nelect, label="", weights=None):
     """Occupied bands in each channel of a collinear spin-polarized run.
 
     Returns
@@ -93,10 +130,10 @@ def get_band_filling_from_wavecar_spinpol(wavecar, nelect, label=""):
         Up and down.
     """
     (e_up, o_up), (e_down, o_down) = wavecar_band_arrays(wavecar)
-    n_up, n_down = utils.spin_channel_electrons(nelect, o_up, o_down, label)
+    n_up, n_down = utils.spin_channel_electrons(nelect, o_up, o_down, label, weights)
     prefix = f"{label}, " if label else ""
-    return (utils.occupied_band_count(n_up, e_up, o_up, prefix + "spin up"),
-            utils.occupied_band_count(n_down, e_down, o_down, prefix + "spin down"))
+    return (utils.occupied_band_count(n_up, e_up, o_up, prefix + "spin up", weights),
+            utils.occupied_band_count(n_down, e_down, o_down, prefix + "spin down", weights))
 
 
 
@@ -275,7 +312,17 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
     # Only the polar list is carried forward, and each run's coefficients are
     # read positionally against it, so the two runs must agree exactly.
     utils.check_kpoints_match(kpoint_list, np_kpoint_list)
-    utils.check_full_bz(kpoint_list)
+
+    # A k-point list that is not a full mesh is taken as an IBZ, to be
+    # unfolded with the symmetry the two structures share. That must make a
+    # full mesh, or this raises.
+    ibz = None
+    if not symmetry.is_full_mesh(kpoint_list):
+        moments = ((read_magmoms(pol_vasprun, len(pol_struct)),
+                    read_magmoms(np_vasprun, len(np_struct))) if spin_pol else (None, None))
+        ibz = symmetry.IBZUnfolding(pol_struct, np_struct, np.array(pol_wavecar.kpoints),
+                                    *moments, weights=read_kpoint_weights(pol_vasprun))
+    weights = None if ibz is None else ibz.weights
 
     # The occupied bands are counted from the electron count, not from the
     # occupations: see utils.occupied_band_count for why.
@@ -284,14 +331,16 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
 
     if spin_pol:
         pol_band_fill_up, pol_band_fill_down = get_band_filling_from_wavecar_spinpol(
-            pol_wavecar, pol_nelect, "polar")
+            pol_wavecar, pol_nelect, "polar", weights)
         np_band_fill_up, np_band_fill_down = get_band_filling_from_wavecar_spinpol(
-            np_wavecar, np_nelect, "non-polar")
+            np_wavecar, np_nelect, "non-polar", weights)
         pol_fill = (pol_band_fill_up, pol_band_fill_down)
         np_fill = (np_band_fill_up, np_band_fill_down)
     else:
-        pol_band_fill = get_band_filling_from_wavecar_nospin(pol_wavecar, pol_nelect, "polar")
-        np_band_fill = get_band_filling_from_wavecar_nospin(np_wavecar, np_nelect, "non-polar")
+        pol_band_fill = get_band_filling_from_wavecar_nospin(pol_wavecar, pol_nelect, "polar",
+                                                             weights)
+        np_band_fill = get_band_filling_from_wavecar_nospin(np_wavecar, np_nelect, "non-polar",
+                                                            weights)
         pol_fill, np_fill = pol_band_fill, np_band_fill
     logger.info('occupied bands%s: polar %s, non-polar %s',
                 ' (up, down)' if spin_pol else '', pol_fill, np_fill)
@@ -322,6 +371,11 @@ def vasp_parser(pol_POSCAR, np_POSCAR, pol_WAVECAR, np_WAVECAR, POTCAR,
                                 momentum_encut=momentum_encut)
         pol_wfcn_dict_paw = pol_future.result()
         np_wfcn_dict_paw = np_future.result()
+
+    if ibz is not None:
+        pol_wfcn_dict_paw = ibz.unfold(pol_wfcn_dict_paw, "pol")
+        np_wfcn_dict_paw = ibz.unfold(np_wfcn_dict_paw, "np")
+        kpoint_list = ibz.full_kpoints
 
     vasp_parse_dict = utils.empty_parse_dict()
     vasp_parse_dict['pol_struct'] = pol_struct

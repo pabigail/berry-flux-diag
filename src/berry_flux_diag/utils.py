@@ -467,7 +467,7 @@ SMEARING_LEAK_WARN = 1e-3
 
 
 def occupied_band_count(n_electrons, energies_by_kpoint, occupations_by_kpoint,
-                        label=""):
+                        label="", weights=None):
     """Number of bands in the occupied manifold of one spin channel.
 
     For an insulator this is the channel's electron count, and that is what
@@ -487,6 +487,9 @@ def occupied_band_count(n_electrons, energies_by_kpoint, occupations_by_kpoint,
         will do.
     label : str
         Names the run in error messages, e.g. "polar" or "non-polar, spin up".
+    weights : sequence of float, optional
+        Each k-point's share of the zone, for an IBZ run. Default equal, as
+        on a full mesh.
 
     Returns
     -------
@@ -517,7 +520,7 @@ def occupied_band_count(n_electrons, energies_by_kpoint, occupations_by_kpoint,
             f"metallic and its polarization is not defined. A non-spin-"
             f"polarized run needs an even NELECT.")
 
-    total = occupations.sum(axis=1).mean()
+    total = np.average(occupations.sum(axis=1), weights=weights)
     if abs(total - n_electrons) > ELECTRON_COUNT_ATOL:
         raise ValueError(
             f"the occupations{where} sum to {total:.6f} electrons per k-point, "
@@ -551,11 +554,13 @@ def occupied_band_count(n_electrons, energies_by_kpoint, occupations_by_kpoint,
     return n_bands
 
 
-def spin_channel_electrons(nelect, occupations_up, occupations_down, label=""):
+def spin_channel_electrons(nelect, occupations_up, occupations_down, label="",
+                           weights=None):
     """Electrons in each spin channel of a collinear spin-polarized run.
 
     NELECT gives only the total. The split is read off each channel's
     occupations, which must sum to whole numbers adding up to NELECT.
+    weights are each k-point's share of the zone, for an IBZ run.
 
     Returns
     -------
@@ -565,7 +570,7 @@ def spin_channel_electrons(nelect, occupations_up, occupations_down, label=""):
     where = f" in the {label} run" if label else ""
     counts = []
     for name, occupations in (("up", occupations_up), ("down", occupations_down)):
-        total = np.asarray(occupations, dtype=float).sum(axis=1).mean()
+        total = np.average(np.asarray(occupations, dtype=float).sum(axis=1), weights=weights)
         count = int(round(total))
         if abs(total - count) > SPIN_CHANNEL_ATOL:
             raise ValueError(
