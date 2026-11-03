@@ -43,7 +43,10 @@ class Overlaps:
             eig_thresh: warn above this Wilson loop phase, in radians
             sing_val_thresh: warn below this overlap singular value
 
-            in this version, no spin polarization, must use full k-grid (not IBZ)
+            Collinear spin-polarized runs are detected from parse_dict['spin_pol']:
+            each 'wfcn' is then [up, down], and the two channels' Berry phases
+            are added with weight 1 rather than one channel's doubled.
+            Must use the full k-grid (not IBZ).
          '''
         self.pol_struct = parse_dict['pol_struct']
         self.np_struct = parse_dict['np_struct']

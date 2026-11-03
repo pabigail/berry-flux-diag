@@ -14,7 +14,8 @@
 This release fixes several bugs that produced a plausible but wrong
 polarization rather than an error. It removes the Intel MKL dependency
 by reimplementing the part of `pawpyseed` that was used, makes the VASP
-path roughly 15× faster, and adds more robust and systematic testing.
+path roughly 15× faster, adds collinear spin-polarized calculations for
+both codes, and adds more robust and systematic testing.
 
 These changes were implemented with [Claude Code](https://claude.com/claude-code).
 All tests and features were manually reviewed.
@@ -139,8 +140,9 @@ to the previous step, not merely within tolerance.
 ### 4. Testing
 
 The previous single test file had never run; it failed to import. There
-are now **240 tests in 17 files**. Only the VASP regression test needs
-data that is not in the repository. Coverage includes:
+are now **272 tests in 19 files**. Only the VASP regression test and the
+spin-polarized BaTiO₃ tests need data that is not in the repository.
+Coverage includes:
 - **Regression fixtures** for BaTiO₃ (QE and VASP), compared with
   `rtol=0`. The default relative tolerance had let a
   constant change pass unnoticed.
@@ -163,6 +165,31 @@ data that is not in the repository. Coverage includes:
   fails.
 
 See [Testing](#testing) for how to run them.
+
+### 5. Collinear spin-polarized calculations
+
+Spin-polarized runs (VASP `ISPIN = 2`, QE `nspin = 2`) now work for both
+codes. Nothing needs to be set: whether a run is spin-polarized is read
+from the WAVECAR header or the QE XML, and the polar and non-polar runs
+must agree. Each spin channel's Berry phases are computed separately with
+its own band count, and the two channels are added.
+
+- **VASP:** the PAW reconstruction now handles both channels. The
+  augmentation term depends only on k and G, so it is built once per
+  k-point and shared by the two channels.
+- **QE:** the spin-polarized reader had never worked. Its two channels were
+  stored as a NumPy object array, which `np.linalg.svd` refuses.
+
+BaTiO₃ is non-magnetic, so a spin-polarized run of it should reproduce the
+non-spin polarization. It does, in both codes:
+- **Exactly** when the same states are used as both channels.
+- **To within 10⁻³ µC/cm²** across separate DFT runs, which converge to
+  very slightly different states.
+
+| | non-spin | spin-polarized | difference |
+|---|---|---|---|
+| QE (µC/cm²) | 45.50666 | 45.50574 | 9 × 10⁻⁴ |
+| VASP (µC/cm²) | 45.78751 | 45.78727 | 2.4 × 10⁻⁴ |
 
 ---
 
@@ -201,13 +228,12 @@ raises an error naming what to change.
 | | Quantum ESPRESSO | VASP |
 |---|---|---|
 | Non-spin-polarized | ✅ | ✅ |
-| Collinear spin-polarized | ❌ not yet supported | ❌ not yet supported |
+| Collinear spin-polarized | ✅ | ✅ |
 | Noncollinear / spin-orbit | ❌ | ❌ |
 | Γ-only | — | ❌ |
 
-Noncollinear, spin-orbit and Γ-only runs raise an error. Collinear
-spin-polarized runs are not yet rejected with a clear error: a QE run
-still returns a number, which should not be used.
+Spin polarization is detected automatically. Noncollinear, spin-orbit and
+Γ-only runs raise an error.
 
 ---
 
@@ -367,8 +393,8 @@ pip install '.[QE,test]'
 pytest
 ```
 
-Without VASP data this runs 239 tests in about 7 seconds. The VASP
-regression test skips, and the QE regression test runs on inputs
+Without the VASP data this runs 259 tests in about 8 seconds. The VASP
+regression test and the spin-polarized BaTiO₃ tests skip, and the QE regression test runs on inputs
 committed in `tests/`. WAVECAR files are too large to commit and POTCARs
 cannot be redistributed, so to run the VASP regression test too, point
 it at a pair of run directories:
@@ -376,7 +402,16 @@ it at a pair of run directories:
 ```bash
 export BFD_VASP_BATIO3_POL=/path/to/polar/run
 export BFD_VASP_BATIO3_NP=/path/to/nonpolar/run
-pytest            # 240 tests, about 40 seconds
+pytest
+```
+
+The spin-polarized tests (`tests/test_spin_batio3.py`) compare spin and
+non-spin BaTiO₃ in both codes. They read the full-BZ runs in
+`batio3_spin_ibz_runs`, made for them:
+
+```bash
+export BFD_BATIO3_SPIN_RUNS=/path/to/batio3_spin_ibz_runs
+pytest            # with both: 272 tests, about 2.5 minutes
 ```
 
 `tests/reference/` pins the BaTiO₃ results for each path. To regenerate a

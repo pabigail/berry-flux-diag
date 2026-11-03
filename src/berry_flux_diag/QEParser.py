@@ -176,10 +176,11 @@ def get_wfcn_gvecs_from_hdf5_spinpol(wfc_folder_path, kpoint_list, max_band_fill
         wfcn_dw = get_wavefunctions_hdf5(filename_dw, stop_band=max_band_fill_dw)
         gvecs_dw = get_wfc_miller_indices(filename_dw)
 
-        wfcn = []
-        wfcn.append(wfcn_up)
-        wfcn.append(wfcn_dw)
-        wfcn = np.array(wfcn, dtype=object)
+        # A list, not np.array([up, dw], dtype=object): with the same band
+        # count in both channels that builds one (2, nbands, npw) array of
+        # Python complex objects, which matrix products crawl through and
+        # np.linalg.svd refuses.
+        wfcn = [wfcn_up, wfcn_dw]
 
         if not utils.check_gvecs_same(gvecs_up, gvecs_dw):
             raise ValueError("gvecs not same for up and down spin channels")

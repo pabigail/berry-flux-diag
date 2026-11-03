@@ -71,9 +71,10 @@ def test_each_run_gets_its_own_inputs_and_result(runs, monkeypatch):
     pol, np_ = by_run[runs["pol"] / "WAVECAR"], by_run[runs["np"] / "WAVECAR"]
     assert pol["vasprun"] == runs["pol"] / "vasprun.xml"
     assert np_["vasprun"] == runs["np"] / "vasprun.xml"
-    assert pol["band_fill"] == d["pol_band_fill"]
-    assert np_["band_fill"] == d["np_band_fill"]
-    assert d["pol_band_fill"] != d["np_band_fill"]
+    # Each run's own count is reported; both are reconstructed to the bands
+    # they share, which is all Overlaps uses.
+    assert (d["pol_band_fill"], d["np_band_fill"]) == (2, 3)
+    assert pol["band_fill"] == np_["band_fill"] == 2
     assert d["pol_wfcn_dict"]["from"] == str(runs["pol"] / "WAVECAR")
     assert d["np_wfcn_dict"]["from"] == str(runs["np"] / "WAVECAR")
 

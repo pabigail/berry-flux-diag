@@ -45,7 +45,10 @@ recomputes the radial-times-Ylm factor for every band, although it depends
 only on k and G. Here that factor is built once per k-point, and all bands
 come out of one matrix product (MomentumMatrix._aug_basis).
 
-Spin-polarized and noncollinear WAVECARs are rejected. VASPParser's PAW
+Collinear spin-polarized WAVECARs (ISPIN = 2) are reconstructed one channel
+at a time: the projections and pseudo coefficients are per channel, while
+the augmentation basis depends only on k and G and is shared. Noncollinear
+WAVECARs are rejected. VASPParser's PAW
 path has only ever used spin channel 0.
 
 Pseudopotential and CoreRegion are copied verbatim from pawpyseed, and the
@@ -523,7 +526,12 @@ class WavecarHeader:
 
 
 def read_wavecar(filename, nbands=None):
-    """read_wavecar: pawpyseed's own G ordering and G_bounds, single precision C."""
+    """read_wavecar: pawpyseed's own G ordering and G_bounds, single precision C.
+
+    Cs[spin][k] holds the coefficients of the first nbands bands. VASP writes
+    every k-point of spin up and then every k-point of spin down, both on the
+    same k-points and G spheres, so kpts and Gs are per k-point only.
+    """
     raw = np.memmap(filename, dtype=np.float64, mode="r")
     nrecl, nspin, nprec = (int(round(v)) for v in raw[:3])
     _check_precision_tag(nprec, filename)
@@ -534,23 +542,29 @@ def read_wavecar(filename, nbands=None):
     b, nbmax = _setup(encut, lattice)
     nb = nband if nbands is None else nbands
     cplx = np.memmap(filename, dtype=np.complex64, mode="r")
-    kpts, Gs, Cs, G_bounds = [], [], [], np.zeros(6, dtype=np.int64)
+    kpts, Gs, G_bounds = [], [], np.zeros(6, dtype=np.int64)
+    Cs = [[] for _ in range(nspin)]
     for iwk in range(nwk * nspin):
+        spin, ik = divmod(iwk, nwk)
         irec = iwk * (1 + nband)
         hdr = raw[(irec + 2) * rec:(irec + 3) * rec]
         nplane = int(round(hdr[0]))
         k = np.array(hdr[1:4])
-        G = _g_sphere(k, nbmax, b, encut)
-        if len(G) != nplane:
-            raise ValueError(f"k-point {iwk}: {len(G)} G vectors for {nplane} plane "
-                             "waves (noncollinear or gamma-only WAVECAR?)")
-        G_bounds[0::2] = np.minimum(G_bounds[0::2], G.min(axis=0))
-        G_bounds[1::2] = np.maximum(G_bounds[1::2], G.max(axis=0))
+        if spin == 0:
+            G = _g_sphere(k, nbmax, b, encut)
+            if len(G) != nplane:
+                raise ValueError(f"k-point {iwk}: {len(G)} G vectors for {nplane} plane "
+                                 "waves (noncollinear or gamma-only WAVECAR?)")
+            G_bounds[0::2] = np.minimum(G_bounds[0::2], G.min(axis=0))
+            G_bounds[1::2] = np.maximum(G_bounds[1::2], G.max(axis=0))
+            kpts.append(k)
+            Gs.append(G)
+        elif not np.array_equal(k, kpts[ik]) or nplane != len(Gs[ik]):
+            raise ValueError(f"spin-down k-point {ik} ({k}, {nplane} plane waves) "
+                             f"does not match spin up ({kpts[ik]}, {len(Gs[ik])})")
         start = (irec + 3) * rec
-        Cs.append(np.array([cplx[start + i * rec: start + i * rec + nplane]
-                            for i in range(nb)]))
-        kpts.append(k)
-        Gs.append(G)
+        Cs[spin].append(np.array([cplx[start + i * rec: start + i * rec + nplane]
+                                  for i in range(nb)]))
     return dict(nspin=nspin, nwk=nwk, nband=nband, encut=encut, lattice=lattice,
                 reclattice=b, kpts=kpts, Gs=Gs, Cs=Cs, G_bounds=G_bounds)
 
@@ -611,13 +625,13 @@ def _site_setup(coord, el, lattice, fftg):
     return {"index": index, "paths": test, "values": values}
 
 
-def _projections(wav, sites, k_idx, fftg):
+def _projections(wav, sites, k_idx, fftg, spin=0):
     """fft3d + onto_projector_helper for every requested band at one k-point.
 
     Returns (nbands, sum_s total_projs_s), site-major, matching the order
     fullwf_reciprocal walks band->projections[s].overlaps.
     """
-    k, G, Cs = wav["kpts"][k_idx], wav["Gs"][k_idx], wav["Cs"][k_idx]
+    k, G, Cs = wav["kpts"][k_idx], wav["Gs"][k_idx], wav["Cs"][spin][k_idx]
     lattice = wav["lattice"]
     n = int(np.prod(fftg))
     grid = np.zeros((len(Cs),) + tuple(fftg), dtype=np.complex128)
@@ -653,7 +667,15 @@ class Wavefunction:
     dim : length-3 sequence of int
         NGX, NGY, NGZ: the real-space grid the projections are taken on.
     nbands : int, optional
-        Load and project only the lowest nbands bands. Default all.
+        Load and project only the lowest nbands bands of each spin channel.
+        Default all.
+
+    Attributes
+    ----------
+    nspin : int
+        1, or 2 for a collinear spin-polarized run.
+    projections : list
+        projections[spin][k], (nbands, sum_s total_projs_s).
     """
 
     @classmethod
@@ -667,20 +689,18 @@ class Wavefunction:
         self.structure = structure
         self.dim = np.array(dim, dtype=np.int64)
         self.wav = read_wavecar(str(wavecar_file), nbands)
-        if self.wav["nspin"] != 1:
-            raise NotImplementedError(
-                "spin-polarized WAVECAR: the PAW reconstruction is only "
-                "implemented for ISPIN = 1")
+        self.nspin = self.wav["nspin"]
         self.nwk, self.nband, self.encut = self.wav["nwk"], self.wav["nband"], self.wav["encut"]
-        self.nbands_loaded = len(self.wav["Cs"][0])
+        self.nbands_loaded = len(self.wav["Cs"][0][0])
 
         elements = {e: _element_setup(pp) for e, pp in cr.pps.items()}
         self.site_elems = [elements[s.specie.symbol] for s in self.structure]
         self.coords = np.array([s.frac_coords for s in self.structure])
         self.sites = [_site_setup(self.coords[i], self.site_elems[i], self.wav["lattice"],
                                   self.dim) for i in range(len(self.structure))]
-        self.projections = [_projections(self.wav, self.sites, k, self.dim)
-                            for k in range(self.nwk)]
+        self.projections = [[_projections(self.wav, self.sites, k, self.dim, spin)
+                             for k in range(self.nwk)]
+                            for spin in range(self.nspin)]
 
 
 class MomentumMatrix:
@@ -697,6 +717,7 @@ class MomentumMatrix:
         self.wf = wf
         b, nbmax = _setup(encut, wf.wav["lattice"])
         self._grid = _g_sphere(np.zeros(3), nbmax, b, encut)
+        self._aug_k = self._aug = None
 
     @property
     def momentum_grid(self):
@@ -731,13 +752,20 @@ class MomentumMatrix:
                 cols.append(radial[n] * ylm[l, m] * (1j ** l) * phase * pref)
         return np.array(cols).T
 
-    def _pseudo(self, k_idx, bands):
+    def _shared_aug_basis(self, k_idx):
+        """_aug_basis for the last k-point asked for, kept so that both spin
+        channels of a k-point use one computation of it."""
+        if self._aug_k != k_idx:
+            self._aug, self._aug_k = self._aug_basis(k_idx), k_idx
+        return self._aug
+
+    def _pseudo(self, k_idx, bands, spin=0):
         wav = self.wf.wav
         gb = wav["G_bounds"]
         f = np.array([gb[1] - gb[0] + 1, gb[3] - gb[2] + 1, gb[5] - gb[4] + 1])
         x = np.zeros((len(bands),) + tuple(f), dtype=np.complex64)
         g = (wav["Gs"][k_idx] % f + f) % f
-        x[:, g[:, 0], g[:, 1], g[:, 2]] = wav["Cs"][k_idx][bands]
+        x[:, g[:, 0], g[:, 1], g[:, 2]] = wav["Cs"][spin][k_idx][bands]
         G = self._grid
         inside = np.all((G >= gb[0::2]) & (G <= gb[1::2]), axis=1)
         gi = (G[inside] + f) % f
@@ -745,16 +773,19 @@ class MomentumMatrix:
         out[:, inside] = x[:, gi[:, 0], gi[:, 1], gi[:, 2]]
         return out
 
-    def get_reciprocal_fullfw_kpoint(self, k, nbands):
-        """All of get_reciprocal_fullfw(b, k, 0) for b < nbands, one matrix product."""
+    def get_reciprocal_fullfw_kpoint(self, k, nbands, spin=0):
+        """All of get_reciprocal_fullfw(b, k, spin) for b < nbands, one matrix product."""
+        if not 0 <= spin < self.wf.nspin:
+            raise ValueError(f"spin {spin} not in a WAVECAR with {self.wf.nspin} channel(s)")
         bands = np.arange(nbands)
-        return self._pseudo(k, bands) + self.wf.projections[k][bands] @ self._aug_basis(k).T
+        return (self._pseudo(k, bands, spin)
+                + self.wf.projections[spin][k][bands] @ self._shared_aug_basis(k).T)
 
     def get_reciprocal_fullfw(self, b, k, s=0):
-        if s != 0 or not 0 <= b < self.wf.nbands_loaded:
+        if not 0 <= s < self.wf.nspin or not 0 <= b < self.wf.nbands_loaded:
             raise ValueError(f"band {b}, spin {s} not loaded")
         # VASPParser asks band by band; build the whole k-point once.
-        if getattr(self, "_cached_k", None) != k:
-            self._cached = self.get_reciprocal_fullfw_kpoint(k, self.wf.nbands_loaded)
-            self._cached_k = k
+        if getattr(self, "_cached_ks", None) != (k, s):
+            self._cached = self.get_reciprocal_fullfw_kpoint(k, self.wf.nbands_loaded, s)
+            self._cached_ks = (k, s)
         return self._cached[b]
