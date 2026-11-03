@@ -26,15 +26,16 @@ MESH = [list(np.array(k) / 2) for k in itertools.product(range(2), repeat=3)]
 
 @pytest.fixture
 def runs(tmp_path, monkeypatch):
-    """Polar and non-polar run directories, with occupations filling a
-    different number of bands in each so the band fillings tell them apart."""
+    """Polar and non-polar run directories, with a different number of
+    electrons in each so the band fillings tell them apart."""
     struct = Structure(Lattice(LATTICE), ["Ba"], [[0, 0, 0]])
     dirs = {}
-    for label, nband, seed in (("pol", 4, 1), ("np", 6, 2)):
+    for label, nband, filled, seed in (("pol", 4, 2, 1), ("np", 6, 3, 2)):
         d = tmp_path / label
         d.mkdir()
         struct.to(filename=str(d / "POSCAR"), fmt="poscar")
-        write_wavecar(d / "WAVECAR", MESH, nband=nband, seed=seed)
+        write_wavecar(d / "WAVECAR", MESH, nband=nband, seed=seed, filled=filled)
+        (d / "vasprun.xml").write_text(f'<i name="NELECT">  {2 * filled}.0</i>\n')
         dirs[label] = d
     # A real POTCAR cannot be committed; only its valences are read here.
     monkeypatch.setattr(VASPParser.Potcar, "from_file", staticmethod(lambda f: None))

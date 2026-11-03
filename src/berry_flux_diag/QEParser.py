@@ -83,31 +83,38 @@ def get_kpt_list_from_qeschema(xml_data):
     return kpoint_list
 
 
-def get_band_filling_from_qeschema_nospin(xml_data, tol):
-
+def _band_arrays_from_qeschema(xml_data):
+    """nelec, and (nk, nbands) energies and occupations as QE wrote them."""
     band_struct_dict = xml_data['qes:espresso']['output']['band_structure']
     ks_energies = band_struct_dict['ks_energies']
+    energies = np.array([kpt['eigenvalues']['$'] for kpt in ks_energies])
+    occupations = np.array([kpt['occupations']['$'] for kpt in ks_energies])
+    return band_struct_dict, float(band_struct_dict['nelec']), energies, occupations
 
-    occupations = (kpt['occupations']['$'] for kpt in ks_energies)
 
-    return utils.max_filled_bands(occupations, tol)
+def get_band_filling_from_qeschema_nospin(xml_data, label=""):
+    """Occupied bands in a non-spin-polarized run: nelec / 2, checked against
+    the occupations by utils.occupied_band_count."""
+    _, nelec, energies, occupations = _band_arrays_from_qeschema(xml_data)
+    return utils.occupied_band_count(nelec / 2, energies, occupations, label)
 
-def get_band_filling_from_qeschema_spinpol(xml_data, tol):
 
-    band_struct_dict = xml_data['qes:espresso']['output']['band_structure']
-    ks_energies = band_struct_dict['ks_energies']
+def get_band_filling_from_qeschema_spinpol(xml_data, label=""):
+    """Occupied bands in each channel of an LSDA run, as (up, down)."""
+    band_struct_dict, nelec, energies, occupations = _band_arrays_from_qeschema(xml_data)
     nband_up = band_struct_dict['nbnd_up']
     nband_dw = band_struct_dict['nbnd_dw']
 
-    # QE writes both spin channels end to end in one occupations array.
-    occupations_up = (kpt['occupations']['$'][0:nband_up] for kpt in ks_energies)
-    occupations_dw = (kpt['occupations']['$'][nband_up:nband_up + nband_dw]
-                      for kpt in ks_energies)
-
-    max_band_fill_up = utils.max_filled_bands(occupations_up, tol)
-    max_band_fill_dw = utils.max_filled_bands(occupations_dw, tol)
-
-    return max_band_fill_up, max_band_fill_dw
+    # QE writes both spin channels end to end in one array per k-point.
+    up = slice(0, nband_up)
+    dw = slice(nband_up, nband_up + nband_dw)
+    n_up, n_dw = utils.spin_channel_electrons(
+        nelec, occupations[:, up], occupations[:, dw], label)
+    prefix = f"{label}, " if label else ""
+    return (utils.occupied_band_count(n_up, energies[:, up], occupations[:, up],
+                                      prefix + "spin up"),
+            utils.occupied_band_count(n_dw, energies[:, dw], occupations[:, dw],
+                                      prefix + "spin down"))
 
 
 def get_wavefunctions_hdf5(filename, start_band=None, stop_band=None):
@@ -296,11 +303,11 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
         raise ValueError("two reference calculations have different spin-polarizations")
 
     spin_pol = spin_pol_pol
-    FILLING_TOL = 1e-6
-
+    # The occupied bands are counted from the electron count, not from the
+    # occupations: see utils.occupied_band_count for why.
     if spin_pol:
-        pol_max_band_fill_up, pol_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(pol_xml_data, FILLING_TOL)
-        np_max_band_fill_up, np_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(np_xml_data, FILLING_TOL)
+        pol_max_band_fill_up, pol_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(pol_xml_data, "polar")
+        np_max_band_fill_up, np_max_band_fill_dw = get_band_filling_from_qeschema_spinpol(np_xml_data, "non-polar")
         if (pol_max_band_fill_up != np_max_band_fill_up or
             pol_max_band_fill_dw != np_max_band_fill_dw):
             logger.warning("max band filling differs between the polar (up %s, down %s) and non-polar (up %s, down %s) runs; using the smaller of each",
@@ -312,9 +319,9 @@ def qe_parser(pol_xml_file, np_xml_file, pol_wfcn_path, np_wfcn_path, pw_out_pat
                                           np_max_band_fill_dw])
     else:
         np_max_band_fill = get_band_filling_from_qeschema_nospin(np_xml_data,
-                                                                 FILLING_TOL)
+                                                                 "non-polar")
         pol_max_band_fill = get_band_filling_from_qeschema_nospin(pol_xml_data,
-                                                                  FILLING_TOL)
+                                                                  "polar")
         if pol_max_band_fill != np_max_band_fill:
             logger.warning("max band filling differs between the polar (%s) and non-polar (%s) runs; using the smaller",
                            pol_max_band_fill, np_max_band_fill)

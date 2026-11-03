@@ -25,11 +25,17 @@ def full_sphere_count(k):
     return len(paw._g_sphere(np.asarray(k, float), nbmax, b, ENCUT))
 
 
-def write_wavecar(path, kpoints, nband=4, spin=1, kind="std", tag=45200, seed=0):
+def write_wavecar(path, kpoints, nband=4, spin=1, kind="std", tag=45200, seed=0,
+                  filled=None):
     """A WAVECAR in VASP's layout: a header record, a record with the
     counts, cutoff and lattice, then per spin and k-point a record of
     plane-wave count, k, and (Re E, Im E, occupation) per band, followed by
-    one coefficient record per band."""
+    one coefficient record per band.
+
+    By default the occupations are random, falling with band index. With
+    filled, an insulator instead: that many full bands at every k-point
+    (one int, or one per spin channel) and a gap of at least 0.6 above
+    them."""
     rng = np.random.default_rng(seed)
     counts = []
     for k in kpoints:
@@ -51,9 +57,15 @@ def write_wavecar(path, kpoints, nband=4, spin=1, kind="std", tag=45200, seed=0)
         for k, nplane in zip(kpoints, counts):
             # Occupations fall with band index from a full lowest band, as
             # in a real run, so the band filling is well defined.
-            occ = np.sort(rng.uniform(0, 1, size=nband))[::-1]
-            occ[0] = 1.0
-            e = np.column_stack([np.sort(rng.normal(size=nband)), np.zeros(nband), occ])
+            if filled is None:
+                occ = np.sort(rng.uniform(0, 1, size=nband))[::-1]
+                occ[0] = 1.0
+                energies = np.sort(rng.normal(size=nband))
+            else:
+                n = filled[s] if np.ndim(filled) else filled
+                occ = (np.arange(nband) < n).astype(float)
+                energies = np.arange(nband) + rng.uniform(-0.2, 0.2, size=nband)
+            e = np.column_stack([energies, np.zeros(nband), occ])
             band_energy.append(e)
             record([nplane, *k, *e.ravel()])
             for _ in range(nband):
@@ -157,15 +169,36 @@ def test_a_plane_wave_count_matching_no_type_is_rejected(tmp_path):
         utils.check_wavecar_type(h.vasp_type, "polar")
 
 
-def test_occupations_feed_the_band_filling_unchanged(tmp_path):
-    """VASPParser reads band_energy[k][:, 2]; the layout must match."""
+@pytest.mark.parametrize("spin", [1, 2])
+def test_band_arrays_are_the_same_from_either_reader(tmp_path, spin):
+    """VASPParser reads band_energy[k][:, 0] and [:, 2]; the layout must match."""
     from berry_flux_diag import VASPParser
 
     f = tmp_path / "WAVECAR"
-    write_wavecar(f, KPTS, nband=6)
-    h, w = paw.WavecarHeader(f), Wavecar(str(f))
-    assert VASPParser.get_band_filling_from_wavecar_nospin(h, 0.3) == \
-        VASPParser.get_band_filling_from_wavecar_nospin(w, 0.3)
+    write_wavecar(f, KPTS, nband=6, spin=spin)
+    mine = VASPParser.wavecar_band_arrays(paw.WavecarHeader(f))
+    theirs = VASPParser.wavecar_band_arrays(Wavecar(str(f)))
+    assert len(mine) == len(theirs) == spin
+    for (e1, o1), (e2, o2) in zip(mine, theirs):
+        assert e1.shape == (len(KPTS), 6)
+        np.testing.assert_array_equal(e1, e2)
+        np.testing.assert_array_equal(o1, o2)
+
+
+def test_the_band_count_is_read_from_the_header(tmp_path):
+    from berry_flux_diag import VASPParser
+
+    f = tmp_path / "WAVECAR"
+    write_wavecar(f, KPTS, nband=6, filled=4)
+    assert VASPParser.get_band_filling_from_wavecar_nospin(paw.WavecarHeader(f), 8.0) == 4
+
+
+def test_the_spin_channels_are_counted_separately(tmp_path):
+    from berry_flux_diag import VASPParser
+
+    f = tmp_path / "WAVECAR"
+    write_wavecar(f, KPTS, nband=6, spin=2, filled=[4, 3])
+    assert VASPParser.get_band_filling_from_wavecar_spinpol(paw.WavecarHeader(f), 7.0) == (4, 3)
 
 
 # --- precision tags --------------------------------------------------------

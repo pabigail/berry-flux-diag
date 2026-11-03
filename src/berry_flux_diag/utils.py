@@ -1,5 +1,9 @@
-import numpy as np
+import logging
 import re
+
+import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def direction_to_vals(direction):
@@ -443,54 +447,136 @@ def check_wavecar_type(vasp_type, label=""):
         )
 
 
-def max_filled_bands(occupations_by_kpoint, tol):
-    """Number of occupied bands, maximized over k-points.
+# How far the occupations may disagree with the electron count before the
+# two are treated as describing different runs. Electron number is conserved
+# by every smearing scheme, so a real run agrees to the precision VASP and QE
+# write occupations with; this catches an electron count read from the wrong
+# run or occupations on the wrong scale, not physics.
+ELECTRON_COUNT_ATOL = 1e-3
+
+# A spin channel's electron count is not stated in the output, so it is read
+# off the channel's occupations, which must sum to a whole number. In an
+# insulator they do, up to the smearing tails; a count further than this from
+# an integer means a band is part filled.
+SPIN_CHANNEL_ATOL = 1e-2
+
+# Above this many electrons per k-point sitting in bands above the occupied
+# manifold, the smearing is large enough to matter for the density, which is
+# worth a warning even though it does not change the band count.
+SMEARING_LEAK_WARN = 1e-3
+
+
+def occupied_band_count(n_electrons, energies_by_kpoint, occupations_by_kpoint,
+                        label=""):
+    """Number of bands in the occupied manifold of one spin channel.
+
+    For an insulator this is the channel's electron count, and that is what
+    is returned. The occupations are only checked against it: with smearing,
+    the lowest empty band has a small occupation near the band edges, so a
+    count read from the occupations depends on where the threshold sits and
+    on which k-points are looked at.
 
     Parameters
     ----------
-    occupations_by_kpoint : iterable of sequences of float
-        One occupation sequence per k-point, each ordered by ascending band
-        energy. For a spin-polarized run, pass one channel at a time.
-    tol : float
-        A band counts as occupied when its occupation is at least this.
+    n_electrons : float
+        Electrons in this channel: NELECT / 2 for a non-spin-polarized run,
+        or the channel's count from spin_channel_electrons.
+    energies_by_kpoint, occupations_by_kpoint : array_like, (nk, nbands)
+        Band energies, ascending at each k-point, and occupations on a 0 to 1
+        scale. The energies are only compared with each other, so any unit
+        will do.
+    label : str
+        Names the run in error messages, e.g. "polar" or "non-polar, spin up".
 
     Returns
     -------
     int
-        The largest number of occupied bands found at any single k-point.
 
     Raises
     ------
     ValueError
-        If any k-point has no occupied band at all, which means the tolerance
-        or the parsed occupations are wrong rather than that the system is
-        unusual.
-
-    Notes
-    -----
-    The count is taken from the index of the first band below tol: band
-    indices start at zero, so that index *is* the number of bands below it.
-
-    Every occupied band must be included in the Berry flux, so the maximum
-    over k-points is the right reduction. For an insulator the count is the
-    same at every k-point; a count that varies with k means bands cross the
-    Fermi level, and the polarization is not well defined. That case is not
-    diagnosed here yet.
+        If the electron count is not a whole number, if the occupations do not
+        sum to it, if the run has fewer bands than that, or if the highest
+        occupied band overlaps the lowest empty one somewhere in the zone.
+        Each of these means there is no isolated occupied manifold, and the
+        Berry phase of one is not defined.
     """
-    max_fill = 0
+    where = f" in the {label} run" if label else ""
+    energies = np.asarray(energies_by_kpoint, dtype=float)
+    occupations = np.asarray(occupations_by_kpoint, dtype=float)
+    if energies.ndim != 2 or energies.shape != occupations.shape:
+        raise ValueError(
+            f"energies and occupations must both be (nk, nbands); got "
+            f"{energies.shape} and {occupations.shape}{where}")
 
-    for kpt_index, occupations in enumerate(occupations_by_kpoint):
-        # No band below tol means every band is occupied, so the count is the
-        # number of bands rather than an error.
-        fill = next((index for index, occ in enumerate(occupations) if occ < tol),
-                    len(occupations))
+    n_bands = int(round(n_electrons))
+    if abs(n_electrons - n_bands) > ELECTRON_COUNT_ATOL or n_bands < 1:
+        raise ValueError(
+            f"{n_electrons:g} electrons{where} do not fill a whole number of "
+            f"bands, so the highest band is part filled: the system is "
+            f"metallic and its polarization is not defined. A non-spin-"
+            f"polarized run needs an even NELECT.")
 
-        if fill == 0:
+    total = occupations.sum(axis=1).mean()
+    if abs(total - n_electrons) > ELECTRON_COUNT_ATOL:
+        raise ValueError(
+            f"the occupations{where} sum to {total:.6f} electrons per k-point, "
+            f"not the {n_electrons:g} expected: the electron count and the "
+            f"occupations do not describe the same run")
+
+    if n_bands > energies.shape[1]:
+        raise ValueError(
+            f"{n_bands} occupied bands expected{where}, but only "
+            f"{energies.shape[1]} were computed")
+
+    if n_bands < energies.shape[1]:
+        # Without an empty band - QE's default for an insulator - there is
+        # nothing to check the gap against, and fixed occupations assume it.
+        gap = energies[:, n_bands].min() - energies[:, n_bands - 1].max()
+        if gap <= 0:
             raise ValueError(
-                f"no occupied bands at k-point {kpt_index}: the lowest band has "
-                f"occupation {occupations[0]}, below the tolerance {tol}"
-            )
+                f"band {n_bands + 1} dips below band {n_bands} by "
+                f"{-gap:.4g}{where}: the occupied bands are not separated "
+                f"from the empty ones by a gap, so the system is metallic "
+                f"and its polarization is not defined")
 
-        max_fill = max(max_fill, fill)
+        leak = occupations[:, n_bands:].sum(axis=1).max()
+        if leak > SMEARING_LEAK_WARN:
+            logger.warning(
+                "smearing puts up to %.3g electrons per k-point above the "
+                "gap%s; the band count is unaffected, but the density is not "
+                "quite that of the insulator. A smaller smearing or the "
+                "tetrahedron method avoids this.", leak, where)
 
-    return max_fill
+    return n_bands
+
+
+def spin_channel_electrons(nelect, occupations_up, occupations_down, label=""):
+    """Electrons in each spin channel of a collinear spin-polarized run.
+
+    NELECT gives only the total. The split is read off each channel's
+    occupations, which must sum to whole numbers adding up to NELECT.
+
+    Returns
+    -------
+    (int, int)
+        Electrons in the up and down channels.
+    """
+    where = f" in the {label} run" if label else ""
+    counts = []
+    for name, occupations in (("up", occupations_up), ("down", occupations_down)):
+        total = np.asarray(occupations, dtype=float).sum(axis=1).mean()
+        count = int(round(total))
+        if abs(total - count) > SPIN_CHANNEL_ATOL:
+            raise ValueError(
+                f"the spin-{name} occupations{where} sum to {total:.4f} "
+                f"electrons, not a whole number: a band in that channel is "
+                f"part filled, so the system is metallic and its "
+                f"polarization is not defined")
+        counts.append(count)
+
+    if abs(sum(counts) - nelect) > ELECTRON_COUNT_ATOL:
+        raise ValueError(
+            f"the spin channels{where} hold {counts[0]} + {counts[1]} "
+            f"electrons, not the NELECT of {nelect:g}")
+    return counts[0], counts[1]

@@ -24,11 +24,17 @@ All tests and features were manually reviewed.
 Several of these changed a polarization without raising an error, so
 **results from earlier versions may be affected**, as noted per item.
 
-- **Occupied-band count (off by one).** The filled-band count accepted a
-  k-point only if it had *two* more filled bands than the running maximum.
-  A single extra band was dropped from the Berry flux, depending on
-  k-point order. Materials with uniform filling across k-points, such as
-  BaTiO₃, are unaffected, but small-gap systems may be.
+- **Occupied-band count.** The number of bands in the Berry flux was read
+  from the occupations: a band counted where its occupation was above
+  10⁻⁶, and k-points were combined with an off-by-one. With smearing, the
+  lowest conduction band of a small-gap insulator passes that threshold
+  near the band edges, so it could be included, depending on the k-point
+  order. An included band counts as fully occupied, however small its
+  occupation. The count is now the electron count (`NELECT` / 2 in VASP,
+  `nelec` / 2 in QE). A run with no gap between the occupied and empty
+  bands raises an error, and large smearing tails give a warning.
+  Materials with uniform filling across k-points, such as BaTiO₃, are
+  unaffected, but small-gap systems run with smearing may be.
 - **Duplicate k-point strings.** `get_strings` grouped k-points by exact
   float equality but filled the groups with a 1e-5 tolerance. When the two
   disagreed, a string was counted twice and the polarization averaged over
@@ -133,7 +139,7 @@ to the previous step, not merely within tolerance.
 ### 4. Testing
 
 The previous single test file had never run; it failed to import. There
-are now **223 tests in 17 files**. Only the VASP regression test needs
+are now **240 tests in 17 files**. Only the VASP regression test needs
 data that is not in the repository. Coverage includes:
 - **Regression fixtures** for BaTiO₃ (QE and VASP), compared with
   `rtol=0`. The default relative tolerance had let a
@@ -147,7 +153,8 @@ data that is not in the repository. Coverage includes:
   pymatgen on every WAVECAR layout, including the ones that are then
   rejected.
 - **Tests for the bug fixes above**, covering the inputs the old code got
-  wrong. Examples are a band that fills at only one k-point, a QE banner
+  wrong. Examples are a smeared conduction band that passes the old
+  occupation threshold at a few k-points, a QE banner
   layout without the MD5 line, and k-points off a line by 1e-7.
 - **Optimizations against the code they replaced.** Each optimization is
   tested against the replaced code, kept verbatim in its test, at the bit
@@ -360,7 +367,7 @@ pip install '.[QE,test]'
 pytest
 ```
 
-Without VASP data this runs 222 tests in about 7 seconds. The VASP
+Without VASP data this runs 239 tests in about 7 seconds. The VASP
 regression test skips, and the QE regression test runs on inputs
 committed in `tests/`. WAVECAR files are too large to commit and POTCARs
 cannot be redistributed, so to run the VASP regression test too, point
@@ -369,7 +376,7 @@ it at a pair of run directories:
 ```bash
 export BFD_VASP_BATIO3_POL=/path/to/polar/run
 export BFD_VASP_BATIO3_NP=/path/to/nonpolar/run
-pytest            # 223 tests, about 40 seconds
+pytest            # 240 tests, about 40 seconds
 ```
 
 `tests/reference/` pins the BaTiO₃ results for each path. To regenerate a
