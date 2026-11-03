@@ -4,8 +4,8 @@ A run on the irreducible Brillouin zone (IBZ) has wavefunctions at one
 k-point of each symmetry orbit of the mesh. Every other mesh point k' is
 k' = s R k - G0 for an IBZ point k, a rotation R, s = +1 or -1 (time
 reversal) and a reciprocal lattice vector G0 that brings it back into the
-mesh's range. This module finds those operations and that mapping; the
-wavefunctions themselves are unfolded elsewhere.
+mesh's range. This module finds those operations and that mapping, and
+applies them to the wavefunctions (unfold_state, unfold_wfcn_dict).
 
 Berry flux diagonalization compares the polar and non-polar states at the
 same k-points, so both runs must use one IBZ list, reduced with the
@@ -254,3 +254,85 @@ def qe_kpoints_text(kpoints, weights):
     lines = ["K_POINTS crystal", f"  {len(kpoints)}"]
     lines += [f"  {k[0]:.10f} {k[1]:.10f} {k[2]:.10f} {w}" for k, w in zip(kpoints, weights)]
     return "\n".join(lines) + "\n"
+
+
+def unfold_state(coeffs, gvecs, k, k_rotation, translation, time_reversal, gshift):
+    """Plane-wave coefficients of the states at s R k - G0, from those at k.
+
+    With {W|t} a symmetry of the structure, R = W^-T and
+    psi_k(x) = sum_G c(G) exp(2 pi i (k + G).x), the state psi_k({W|t}^-1 x)
+    is a state at R k, with coefficient
+
+        c(G) exp(-2 pi i R(k + G).t)      at   R G.
+
+    Time reversal conjugates that and negates the wavevector, and G0 brings
+    s R k back into the mesh's range, so the coefficient lands at
+    s R G + G0. Rotations keep |k + G|, so the plane-wave set stays a set
+    of the same cutoff. The states come out in whatever gauge the rotation
+    gives them, which Berry flux diagonalization does not see. In particular
+    the R k . t part of the phase is the same for every coefficient and band,
+    so leaving it out would change nothing measurable; it is kept so that the
+    result is exactly psi_k({W|t}^-1 x).
+
+    Parameters
+    ----------
+    coeffs : (nbands, ng) complex
+    gvecs : (ng, 3) int
+        Plane waves relative to k, in the reciprocal basis.
+    k : (3,)
+        The k-point the coefficients belong to, as the DFT code wrote it.
+    k_rotation : (3, 3) int
+        R = W^-T.
+    translation : (3,)
+        t, the structure's translation for this rotation.
+    time_reversal : bool
+    gshift : (3,) int
+        G0.
+
+    Returns
+    -------
+    (coeffs, gvecs) at s R k - G0.
+    """
+    gvecs = np.asarray(gvecs)
+    rotated = gvecs @ k_rotation.T
+    phase = np.exp(-2j * np.pi * ((np.asarray(k) @ k_rotation.T + rotated) @ np.asarray(translation)))
+    out = np.asarray(coeffs) * phase
+    if time_reversal:
+        out, rotated = out.conj(), -rotated
+    return out, (rotated + np.asarray(gshift)).astype(gvecs.dtype)
+
+
+def unfold_wfcn_dict(wfcn_dict, ibz_kpoints, kmap, k_rotations, translations):
+    """The full-mesh wavefunction dictionary, from the IBZ one.
+
+    Parameters
+    ----------
+    wfcn_dict : dict
+        As the parsers build it, keyed by IBZ k-point rounded to
+        KPOINT_DECIMALS: {'wfcn': (nbands, ng) array, or [up, down] for a
+        spin-polarized run, 'gvecs': (ng, 3) ints}.
+    ibz_kpoints : (n_ibz, 3)
+        The IBZ k-points in the order kmap was built from, unrounded.
+    kmap : KpointMap
+    k_rotations : (n_ops, 3, 3) int
+    translations : (n_ops, 3)
+        This structure's translations: the polar and non-polar runs are each
+        unfolded with their own.
+
+    Returns
+    -------
+    dict keyed by full-mesh k-point, in the same layout.
+    """
+    ibz_kpoints = np.asarray(ibz_kpoints, dtype=float)
+    full = {}
+    for j, kfull in enumerate(kmap.full_kpoints):
+        i, o = kmap.ibz_index[j], kmap.op_index[j]
+        k = ibz_kpoints[i]
+        entry = wfcn_dict[tuple(np.around(k, KPOINT_DECIMALS))]
+        args = (k, k_rotations[o], translations[o], bool(kmap.time_reversal[j]), kmap.gshift[j])
+        channels = entry["wfcn"] if isinstance(entry["wfcn"], list) else [entry["wfcn"]]
+        unfolded = [unfold_state(c, entry["gvecs"], *args) for c in channels]
+        wfcn = [c for c, _ in unfolded]
+        full[tuple(kfull)] = {"wfcn": wfcn if isinstance(entry["wfcn"], list) else wfcn[0],
+                              "gvecs": unfolded[0][1]}
+    return full
