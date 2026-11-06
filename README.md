@@ -15,7 +15,8 @@ This release fixes several bugs that produced a plausible but wrong
 polarization rather than an error. It removes the Intel MKL dependency
 by reimplementing the part of `pawpyseed` that was used, makes the VASP
 path roughly 15× faster, adds collinear spin-polarized calculations for
-both codes, and adds more robust and systematic testing.
+both codes, accepts DFT runs on the irreducible Brillouin zone, and adds
+more robust and systematic testing.
 
 These changes were implemented with [Claude Code](https://claude.com/claude-code).
 All tests and features were manually reviewed.
@@ -56,7 +57,9 @@ Several of these changed a polarization without raising an error, so
   plausible number instead of an error:
   - the two runs having different k-point meshes or k-point order;
   - the two structures listing atoms in different orders;
-  - a symmetry-reduced (irreducible-wedge) k-point set.
+  - a symmetry-reduced (irreducible-wedge) k-point set, which was read as
+    if it were the full mesh. Such runs are now unfolded to the full mesh
+    instead (see [IBZ runs](#6-dft-runs-on-the-irreducible-brillouin-zone)).
 - **Unsupported calculations are rejected, not misread.** These now raise
   an error that says what to change:
   - QE noncollinear and spin-orbit runs;
@@ -140,8 +143,8 @@ to the previous step, not merely within tolerance.
 ### 4. Testing
 
 The previous single test file had never run; it failed to import. There
-are now **272 tests in 19 files**. Only the VASP regression test and the
-spin-polarized BaTiO₃ tests need data that is not in the repository.
+are now **347 tests in 24 files**. Only the VASP regression test and the
+spin-polarized and IBZ BaTiO₃ tests need data that is not in the repository.
 Coverage includes:
 - **Regression fixtures** for BaTiO₃ (QE and VASP), compared with
   `rtol=0`. The default relative tolerance had let a
@@ -163,6 +166,11 @@ Coverage includes:
   level. For the later steps the tests were also *mutation-checked*: the
   new code was deliberately broken in several ways to confirm a test
   fails.
+- **IBZ unfolding against exact states.** Bloch sums of Gaussians have
+  plane-wave coefficients known at every k, so their unfolded IBZ states
+  are checked exactly, on structures with nonzero fractional translations
+  (BaTiO₃ shifted off its symmetry origin, and hcp Zn with its screw
+  axis). The same test fails when the translation phase is dropped.
 
 See [Testing](#testing) for how to run them.
 
@@ -191,6 +199,97 @@ non-spin polarization. It does, in both codes:
 | QE (µC/cm²) | 45.50666 | 45.50574 | 9 × 10⁻⁴ |
 | VASP (µC/cm²) | 45.78751 | 45.78727 | 2.4 × 10⁻⁴ |
 
+### 6. DFT runs on the irreducible Brillouin zone
+
+The DFT calculations can now be run on the irreducible Brillouin zone
+(IBZ) alone, which makes them faster: BaTiO₃ needs 18 k-points instead of
+216 (VASP, 6×6×6) or 125 (QE, 5×5×5). Berry flux diagonalization itself
+still needs the wavefunctions on the **full Brillouin zone**, since its
+Wilson loops run along strings of k-points across the whole zone. So the
+parsers unfold the IBZ states to the full mesh before computing anything.
+Nothing needs to be set: a k-point list that is not a full mesh is taken
+as an IBZ.
+
+**The symmetry phase.** Each point k′ of the full mesh is the image of an
+IBZ point k under a symmetry operation {W|t} (rotation W, fractional
+translation t): k′ = Rk with R = W⁻ᵀ, or −Rk when time reversal is used
+as well. The state at k′ is the IBZ state with each plane-wave coefficient
+moved from G to RG and multiplied by a phase:
+
+```
+c_k′(RG) = exp(−2πi R(k+G)·t) c_k(G)        (complex-conjugated under time reversal)
+```
+
+This phase is essential for correctness. Its factor exp(−2πi RG·t)
+changes from one plane wave to the next, so it changes the state itself,
+not just its gauge, and the gauge invariance of Berry flux
+diagonalization does not absorb it. Leaving it out gives wrong states,
+and a wrong polarization, for any operation with a fractional translation
+(a screw axis, a glide plane, or a structure not centred on its symmetry
+origin). Only the remaining factor exp(−2πi Rk·t), the same for every G,
+is a global phase per k-point, which cancels. A rotation the two
+structures share can have a different t in each, so each run is unfolded
+with its own translations.
+
+**Both runs must use the same k-points.** The polar and non-polar runs
+must still use one identical k-point list, as on the full mesh. That list
+must be reduced with only the symmetry operations both structures share,
+together with time reversal. For BaTiO₃ that is the 8 operations of P4mm,
+not the 48 of cubic Pm-3m. Each code's own automatic reduction would give
+each structure a different list, so the IBZ is run in two steps:
+
+1. **SCF** with symmetry on, as usual, on the full mesh.
+2. **NSCF** on the shared IBZ list, with symmetry off so that the code
+   keeps the list as given:
+   - **VASP:** `ICHARG = 11`, `ISYM = 0`, `LWAVE = .TRUE.`, and an explicit
+     `KPOINTS` file.
+   - **Quantum ESPRESSO:** `calculation = 'nscf'`, `nosym = .true.` and
+     `noinv = .true.`, with a `K_POINTS crystal` card.
+
+`berry_flux_diag.symmetry` computes the shared list and writes it for
+either code:
+
+```python
+from pymatgen.core import Structure
+from berry_flux_diag import symmetry
+
+pol = Structure.from_file("pol/POSCAR")
+non_pol = Structure.from_file("np/POSCAR")
+shared = symmetry.shared_symmetry(pol, non_pol)  # add magmoms for spin-polarized runs
+mesh = symmetry.monkhorst_pack((6, 6, 6), shift=(1, 1, 1))  # the full-BZ mesh
+reps, mult = symmetry.reduce_mesh(mesh, shared.k_rotations)
+
+kpoints = symmetry.vasp_kpoints_text(mesh[reps], mult)  # VASP KPOINTS file
+card = symmetry.qe_kpoints_text(mesh[reps], mult)       # QE K_POINTS card
+```
+
+For a spin-polarized run, give `shared_symmetry` each structure's
+collinear moments. Only operations that map every atom onto an atom with
+the same moment are used: one that exchanged up and down moments would map
+each spin channel onto the other. When the IBZ runs are parsed, an error
+is raised if their list was not reduced with the shared operations, if
+their k-point weights do not match the multiplicities, or if it does not
+unfold to a full mesh.
+
+On BaTiO₃ the IBZ runs reproduce the full-BZ runs in both codes:
+
+| | non-spin, full BZ | non-spin, IBZ | spin, full BZ | spin, IBZ |
+|---|---|---|---|---|
+| QE (µC/cm²) | 45.50666 | 45.50895 | 45.50574 | 45.50774 |
+| VASP (µC/cm²) | 45.78751 | 45.78986 | 45.78727 | 45.78895 |
+
+- **Unfolding is exact:** a full-BZ run's own IBZ states, unfolded,
+  reproduce its states at every other mesh point to the DFT convergence.
+  1 − the smallest singular value of their overlap is 5 × 10⁻⁹ (QE) and
+  10⁻⁶ (VASP).
+- **The remaining 2 × 10⁻³ µC/cm²** comes from the DFT. The SCF + NSCF
+  runs converge to very slightly different states than the full-BZ runs,
+  and these small differences add up coherently over the mesh. Tighter
+  DFT convergence would reduce it.
+- **Faster parsing too:** only the IBZ k-points are read and
+  PAW-reconstructed. For BaTiO₃ VASP, parsing takes about 4 s instead of
+  9.4 s.
+
 ---
 
 ## Workflow Overview
@@ -217,10 +316,12 @@ The first three are checked when the output is parsed, and a violation
 raises an error naming what to change.
 
 - Both reference structures must have **the same number of atoms in the same order** in the input files.  
-- The DFT calculations for the two structures must use **the same k-point mesh discretization**.
-- Need to save wavefunctions over the entire BZ
-    - VASP: `INCAR` must have `LWAVE = True` and `ISYM = -1`
-    - Quantum ESPRESSO: .in file must have `nosym = True` in `&SYSTEM` and `wf_collect = True` in `&CONTROL`
+- The DFT calculations for the two structures must use **the same k-points**: the same full mesh, or the same IBZ list.
+- Wavefunctions must be saved either over the entire BZ, or on the IBZ shared by the two structures:
+    - Full BZ:
+        - VASP: `INCAR` must have `LWAVE = True` and `ISYM = -1`
+        - Quantum ESPRESSO: .in file must have `nosym = True` in `&SYSTEM` and `wf_collect = True` in `&CONTROL`
+    - IBZ: an SCF followed by an NSCF on the shared IBZ list (see [IBZ runs](#6-dft-runs-on-the-irreducible-brillouin-zone))
 - Apply translation that minimizes maximum atomic displacement between two reference structures; if the translation that minimizes this distance is still > 0.3 Angstroms, add as many interpolations as necessary so that the max atomic displacement between any two adjacent structures is <= 0.3 Angstroms. See the preprocessing tutorial for automated code to do so, and [Poteshman et al., *npj Comp. Mat.* 12(1), (2026) ](https://www.nature.com/articles/s41524-025-01955-1) for more details. 
 
 ### Supported calculations
@@ -229,11 +330,13 @@ raises an error naming what to change.
 |---|---|---|
 | Non-spin-polarized | ✅ | ✅ |
 | Collinear spin-polarized | ✅ | ✅ |
+| Full-BZ k-points | ✅ | ✅ |
+| IBZ k-points (unfolded to the full BZ) | ✅ | ✅ |
 | Noncollinear / spin-orbit | ❌ | ❌ |
 | Γ-only | — | ❌ |
 
-Spin polarization is detected automatically. Noncollinear, spin-orbit and
-Γ-only runs raise an error.
+Spin polarization and IBZ runs are detected automatically. Noncollinear,
+spin-orbit and Γ-only runs raise an error.
 
 ---
 
@@ -393,8 +496,8 @@ pip install '.[QE,test]'
 pytest
 ```
 
-Without the VASP data this runs 259 tests in about 8 seconds. The VASP
-regression test and the spin-polarized BaTiO₃ tests skip, and the QE regression test runs on inputs
+Without the VASP data this runs 314 tests in about 11 seconds. The VASP
+regression test and the spin-polarized and IBZ BaTiO₃ tests skip, and the QE regression test runs on inputs
 committed in `tests/`. WAVECAR files are too large to commit and POTCARs
 cannot be redistributed, so to run the VASP regression test too, point
 it at a pair of run directories:
@@ -406,12 +509,13 @@ pytest
 ```
 
 The spin-polarized tests (`tests/test_spin_batio3.py`) compare spin and
-non-spin BaTiO₃ in both codes. They read the full-BZ runs in
+non-spin BaTiO₃ in both codes, and the IBZ tests (`tests/test_ibz_batio3.py`)
+compare the IBZ runs, unfolded, against the full-BZ runs. Both read
 `batio3_spin_ibz_runs`, made for them:
 
 ```bash
 export BFD_BATIO3_SPIN_RUNS=/path/to/batio3_spin_ibz_runs
-pytest            # with both: 272 tests, about 2.5 minutes
+pytest            # with both: 347 tests, about 8 minutes
 ```
 
 `tests/reference/` pins the BaTiO₃ results for each path. To regenerate a
