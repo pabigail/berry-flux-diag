@@ -320,9 +320,14 @@ def check_species_match(pol_struct, np_struct):
     ------
     ValueError
         If the structures differ in atom count or in species order.
+
+    A QE structure's species labels (site property 'qe_label', e.g. Fe1 and
+    Fe2 for two magnetic sublattices) are compared too, not just elements.
     """
-    pol_species = [str(site.specie) for site in pol_struct]
-    np_species = [str(site.specie) for site in np_struct]
+    def names(struct):
+        return [site.properties.get('qe_label') or str(site.specie) for site in struct]
+
+    pol_species, np_species = names(pol_struct), names(np_struct)
 
     if len(pol_species) != len(np_species):
         raise ValueError(

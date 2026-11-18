@@ -1,5 +1,7 @@
 import logging
+import re
 
+from pymatgen.core.periodic_table import Element
 from pymatgen.core.structure import Structure
 from pymatgen.io.pwscf import PWOutput
 import qeschema
@@ -11,23 +13,48 @@ from berry_flux_diag.constants import BOHR_TO_ANGSTROM
 
 logger = logging.getLogger(__name__)
 
-def get_struct_from_qeschema(xml_data):
+def element_from_qe_label(label):
+    """The element a QE species label names.
 
+    QE labels a species with its chemical symbol, optionally followed by
+    digits, '_' or '-' and anything after: 'Fe1', 'Fe_up' and 'Fe-2' are all
+    iron. Magnetic runs need such labels, one per sublattice, and these used
+    to go to pymatgen as they were, which read 'Fe1' and 'Fe2' as the ions
+    Fe+ and Fe2+ and failed outright on 'Fe_up' or 'FeA'.
+    """
+    match = re.match(r'^([A-Z][a-z]?)', label.strip().capitalize())
+    if match:
+        symbol = match.group(1)
+        # A two-letter match that is not an element ('Ou' from 'Oup') is a
+        # one-letter symbol followed by a suffix.
+        for candidate in (symbol, symbol[0]):
+            if Element.is_valid_symbol(candidate):
+                return candidate
+    raise ValueError(f"cannot read an element from the QE species label {label!r}")
+
+
+def get_struct_from_qeschema(xml_data):
+    """The run's final structure, in angstrom.
+
+    Each site's species is the element its label names; the label itself
+    is kept as the site property 'qe_label', so that two magnetic
+    sublattices of one element stay distinguishable.
+    """
     atomic_struct = xml_data['qes:espresso']['output']['atomic_structure']
 
     lattice = [list(np.array(atomic_struct['cell']['a1'])*BOHR_TO_ANGSTROM),
                list(np.array(atomic_struct['cell']['a2'])*BOHR_TO_ANGSTROM),
                list(np.array(atomic_struct['cell']['a3'])*BOHR_TO_ANGSTROM)]
     
-    species = []
-    coords = []
-    for atom in atomic_struct['atomic_positions']['atom']:
-        species.append(atom['@name'])
-        coords.append(np.array(atom['$'])*BOHR_TO_ANGSTROM) # convert from Bohr to angstrom
-        
-    structure = Structure(lattice, species, coords, coords_are_cartesian=True)
-    
-    return structure
+    atoms = atomic_struct['atomic_positions']['atom']
+    if isinstance(atoms, dict):
+        atoms = [atoms]
+    labels = [atom['@name'] for atom in atoms]
+    species = [element_from_qe_label(label) for label in labels]
+    coords = [np.array(atom['$'])*BOHR_TO_ANGSTROM for atom in atoms]  # bohr to angstrom
+
+    return Structure(lattice, species, coords, coords_are_cartesian=True,
+                     site_properties={'qe_label': labels})
 
 
 def get_spin_pol_from_qeschema(xml_data):
