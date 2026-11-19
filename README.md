@@ -143,8 +143,9 @@ to the previous step, not merely within tolerance.
 ### 4. Testing
 
 The previous single test file had never run; it failed to import. There
-are now **347 tests in 24 files**. Only the VASP regression test and the
-spin-polarized and IBZ BaTiO₃ tests need data that is not in the repository.
+are now **402 tests in 26 files**. Only the VASP regression test, the
+spin-polarized and IBZ BaTiO₃ tests and the FeBiO₃ AFM tests need data
+that is not in the repository.
 Coverage includes:
 - **Regression fixtures** for BaTiO₃ (QE and VASP), compared with
   `rtol=0`. The default relative tolerance had let a
@@ -496,8 +497,9 @@ pip install '.[QE,test]'
 pytest
 ```
 
-Without the VASP data this runs 314 tests in about 11 seconds. The VASP
-regression test and the spin-polarized and IBZ BaTiO₃ tests skip, and the QE regression test runs on inputs
+Without the VASP data this runs 340 tests in about 11 seconds. The VASP
+regression test, the spin-polarized and IBZ BaTiO₃ tests and the FeBiO₃
+AFM tests skip, and the QE regression test runs on inputs
 committed in `tests/`. WAVECAR files are too large to commit and POTCARs
 cannot be redistributed, so to run the VASP regression test too, point
 it at a pair of run directories:
@@ -515,7 +517,20 @@ compare the IBZ runs, unfolded, against the full-BZ runs. Both read
 
 ```bash
 export BFD_BATIO3_SPIN_RUNS=/path/to/batio3_spin_ibz_runs
-pytest            # with both: 347 tests, about 8 minutes
+pytest            # with both: 373 tests, about 8 minutes
+```
+
+The FeBiO₃ tests (`tests/test_febio3_afm_vasp.py`) are the magnetic case:
+G-type antiferromagnetic FeBiO₃ in VASP, spin-polarized DFT+U at U = 0 and
+5.3 eV, each on the full BZ and on the 23-point IBZ that the moments leave
+the two structures. They check the band counts, the exactness of the
+unfolding, the IBZ runs' states and polarizations against the full-BZ
+runs', and pin all four polarizations. They read the runs in
+`febio3_spin_ibz_runs/VASP_AFM`:
+
+```bash
+export BFD_FEBIO3_AFM_VASP=/path/to/febio3_spin_ibz_runs/VASP_AFM
+pytest tests/test_febio3_afm_vasp.py   # 29 tests, about 8 minutes, ~25 GB of memory
 ```
 
 `tests/reference/` pins the BaTiO₃ results for each path. To regenerate a
