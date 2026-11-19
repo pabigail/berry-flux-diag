@@ -143,9 +143,9 @@ to the previous step, not merely within tolerance.
 ### 4. Testing
 
 The previous single test file had never run; it failed to import. There
-are now **402 tests in 26 files**. Only the VASP regression test, the
-spin-polarized and IBZ BaTiO₃ tests and the FeBiO₃ AFM tests need data
-that is not in the repository.
+are now **421 tests in 27 files**. Only the VASP regression test, the
+spin-polarized and IBZ BaTiO₃ tests, the FeBiO₃ AFM tests and the LiNbO₃
+chain tests need data that is not in the repository.
 Coverage includes:
 - **Regression fixtures** for BaTiO₃ (QE and VASP), compared with
   `rtol=0`. The default relative tolerance had let a
@@ -306,6 +306,23 @@ To compute differences in formal polarization:
 
 3. **Post-process the DFT output** to compute differences in formal polarization
    -  (See tutorials/postprocess\_DFT.ipynb)
+   - If step 1 interpolated images between the two structures, parse each
+     adjacent pair (pol → image 1, image 1 → image 2, …, image n → np),
+     each with its first structure as the polar one. Pass the pairs to
+     `Overlaps.chain_polarization`, which works for both codes, with or
+     without spin, on the full BZ or the IBZ. As in BFDJobs, it sums only
+     the electronic parts over the pairs, and computes the ionic part once,
+     from the two ends:
+
+     ```python
+     from berry_flux_diag.Overlaps import chain_polarization
+     dirs = ["pol_orig", "interp_1", "np_trans"]
+     pairs = (bfd.VASPParser.vasp_parser(f"{a}/POSCAR", f"{b}/POSCAR", f"{a}/WAVECAR",
+                                         f"{b}/WAVECAR", f"{a}/POTCAR", a, b)
+              for a, b in zip(dirs[:-1], dirs[1:]))     # a generator: one pair in memory at a time
+     result = chain_polarization(pairs)
+     result["polarization_norm"], result["polarization_cartesian"]
+     ```
 
 Unlike the standard approach—where formal polarization is computed separately for two reference structures and then subtracted along the same branch—**Berry Flux diagonalization computes a gauge-invariant difference directly from the wavefunctions of both structures together**.
 
@@ -497,9 +514,9 @@ pip install '.[QE,test]'
 pytest
 ```
 
-Without the VASP data this runs 340 tests in about 11 seconds. The VASP
-regression test, the spin-polarized and IBZ BaTiO₃ tests and the FeBiO₃
-AFM tests skip, and the QE regression test runs on inputs
+Without the VASP data this runs 351 tests in about 11 seconds. The VASP
+regression test, the spin-polarized and IBZ BaTiO₃ tests, the FeBiO₃
+AFM tests and the LiNbO₃ chain tests skip, and the QE regression test runs on inputs
 committed in `tests/`. WAVECAR files are too large to commit and POTCARs
 cannot be redistributed, so to run the VASP regression test too, point
 it at a pair of run directories:
@@ -531,6 +548,20 @@ runs', and pin all four polarizations. They read the runs in
 ```bash
 export BFD_FEBIO3_AFM_VASP=/path/to/febio3_spin_ibz_runs/VASP_AFM
 pytest tests/test_febio3_afm_vasp.py   # 29 tests, about 8 minutes, ~25 GB of memory
+```
+
+The chain tests (`tests/test_chain_polarization.py`) check
+`Overlaps.chain_polarization`. Its bookkeeping is tested on synthetic
+electronic changes, which always run. With the data, it is also tested on
+LiNbO₃ in VASP, where a polar structure is paired with rigid translations of
+the non-polar one:
+
+- a chain through a translation reproduces the direct pair;
+- a chain recovers the branch that a 0.79 Å pair misses by one quantum.
+
+```bash
+export BFD_LINBO3_RUNS=/path/to/linbo3_ibz_interp_runs
+pytest tests/test_chain_polarization.py   # 19 tests, about 3 minutes
 ```
 
 `tests/reference/` pins the BaTiO₃ results for each path. To regenerate a

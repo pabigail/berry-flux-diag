@@ -309,64 +309,40 @@ class Overlaps:
 
         Returns polarization in electron Angstroms.
         """
-        norms = structure.lattice.lengths
-        return np.multiply(norms, -np.array(frac_coord) * zval)
-    
-    
+        return _calc_ionic(frac_coord, structure, zval)
+
+
     def get_ionic_pol_change(self):
         """ ionic part of polarization """
-        
-        lattice = self.pol_struct.lattice
-        fcoords_pol = self.pol_struct.frac_coords
-        fcoords_np = self.np_struct.frac_coords
-        pbc_shortest_vecs = pbc_shortest_vectors(lattice, fcoords_np, fcoords_pol)
-        cart_coords_for_ion_calc = []
-        
-        # calculate differences between ions across pbc
-        for i in range(len(pbc_shortest_vecs)):
-            cart_coords_for_ion_calc.append(pbc_shortest_vecs[i][i])
-        frac_coords_for_ion_calc = lattice.get_fractional_coords(cart_coords_for_ion_calc) 
-        
-        # extract charge of ions from zval dict
-        tot_ionic = []
-        for site, frac_coord in zip(self.pol_struct, frac_coords_for_ion_calc):
-            zval = self.zval_dict[utils.extract_letters(str(site.specie))]
-            tot_ionic.append(self.calc_ionic(frac_coord, self.pol_struct, zval))
-        ion_diff =  np.sum(tot_ionic, axis=0) # in electron Angstroms:
-        
-        # convert to muC/cm^2. The sign is negative because calc_ionic already
-        # returns -z*dr, so the two cancel to the usual +sum(z*dr).
-        pol_units = -E_PER_ANG2_TO_MUC_PER_CM2 / self.pol_struct.lattice.volume
-        ionic_contrib = pol_units * ion_diff # in muC/cm^2
-        
-        return ionic_contrib
-    
-    
-    
+        return ionic_pol_change(self.pol_struct, self.np_struct, self.zval_dict)
+
+
     def get_spont_pol(self, elec_change):
-        # Returns all three components. Valid only for an orthogonal cell:
-        # the fractional electronic change is scaled by a, b and c
-        # separately, which is not the general lattice transformation.
+        # The three components are coefficients along the unit lattice
+        # vectors a/|a|, b/|b|, c/|c|, not Cartesian ones, which is why
+        # polarization_norm sums them along those vectors.
         ion_contrib = self.get_ionic_pol_change() # muC / cm^2
+        elec_contrib = electronic_contrib(elec_change, self.pol_struct.lattice)
 
-        lattice = self.pol_struct.lattice
-        scale = E_PER_ANG2_TO_MUC_PER_CM2 / lattice.volume
-
-        elec_contrib_x = scale * np.array(elec_change[0]) * lattice.a
-        elec_contrib_y = scale * np.array(elec_change[1]) * lattice.b
-        elec_contrib_z = scale * np.array(elec_change[2]) * lattice.c
-
-        elec_contrib = np.array([elec_contrib_x, elec_contrib_y, elec_contrib_z]) # muC / cm^2
-        
-        
         logger.info('electronic contribution: %s', elec_contrib)
         logger.info('ionic contribution: %s', ion_contrib)
 
         return ion_contrib + elec_contrib
-    
-    
-    def compute_polarization(self):
 
+
+    def electronic_change(self):
+        """The electronic change from the non-polar to the polar structure.
+
+        Returns
+        -------
+        elec_change : list of 3 floats
+            Along a, b and c: the Berry phases of each direction's strings
+            over 2 pi, averaged over the strings and weighted by occupation
+            (2 per band without spin, 1 per band per channel with it), in
+            units of e times a lattice vector.
+        dict_debug : dict, or [up, down] of them
+            compute_string_sums' debug output.
+        """
         if self.spin_pol:
 
             self.spin_state = 0
@@ -396,18 +372,197 @@ class Overlaps:
                            occ_fact * strings_sum[1] / strings_len[1],
                            occ_fact * strings_sum[2] / strings_len[2]]
 
+        return elec_change, dict_debug
 
-        # fractional coordinates
+
+    def compute_polarization(self):
+
+        elec_change, dict_debug = self.electronic_change()
+
+        # components along the unit lattice vectors
         final_pol = self.get_spont_pol(elec_change)
-
-        # normalization
-        a, b, c = self.pol_struct.lattice.matrix
-        a, b, c = a / np.linalg.norm(a), b / np.linalg.norm(b), c / np.linalg.norm(c)
-
-        P_norm = np.linalg.norm(a * final_pol[0] +
-                                b * final_pol[1] +
-                                c * final_pol[2])
+        P_norm = polarization_norm(final_pol, self.pol_struct.lattice)
 
         logger.info('final_pol frac: %s', final_pol)
         logger.info('polarization: %s muC / cm^2', P_norm)
         return P_norm, dict_debug
+
+
+def _calc_ionic(frac_coord, structure: Structure, zval: float) -> np.ndarray:
+    """The ionic dipole of one site in electron angstroms, as -zval times
+    its fractional displacement scaled by the lattice lengths."""
+    norms = structure.lattice.lengths
+    return np.multiply(norms, -np.array(frac_coord) * zval)
+
+
+def ionic_pol_change(pol_struct, np_struct, zval_dict):
+    """Ionic change in polarization from np_struct to pol_struct, in muC/cm^2,
+    as components along the unit lattice vectors of pol_struct.
+
+    Each site moves along the shortest vector between its two positions
+    across the periodic boundaries.
+    """
+    lattice = pol_struct.lattice
+    fcoords_pol = pol_struct.frac_coords
+    fcoords_np = np_struct.frac_coords
+    pbc_shortest_vecs = pbc_shortest_vectors(lattice, fcoords_np, fcoords_pol)
+    cart_coords_for_ion_calc = []
+
+    # calculate differences between ions across pbc
+    for i in range(len(pbc_shortest_vecs)):
+        cart_coords_for_ion_calc.append(pbc_shortest_vecs[i][i])
+    frac_coords_for_ion_calc = lattice.get_fractional_coords(cart_coords_for_ion_calc)
+
+    # extract charge of ions from zval dict
+    tot_ionic = []
+    for site, frac_coord in zip(pol_struct, frac_coords_for_ion_calc):
+        zval = zval_dict[utils.extract_letters(str(site.specie))]
+        tot_ionic.append(_calc_ionic(frac_coord, pol_struct, zval))
+    ion_diff = np.sum(tot_ionic, axis=0) # in electron Angstroms:
+
+    # convert to muC/cm^2. The sign is negative because calc_ionic already
+    # returns -z*dr, so the two cancel to the usual +sum(z*dr).
+    pol_units = -E_PER_ANG2_TO_MUC_PER_CM2 / pol_struct.lattice.volume
+    return pol_units * ion_diff # in muC/cm^2
+
+
+def electronic_contrib(elec_change, lattice):
+    """Electronic change in muC/cm^2 from Overlaps.electronic_change's
+    output, as components along the unit lattice vectors of lattice."""
+    scale = E_PER_ANG2_TO_MUC_PER_CM2 / lattice.volume
+
+    elec_contrib_x = scale * np.array(elec_change[0]) * lattice.a
+    elec_contrib_y = scale * np.array(elec_change[1]) * lattice.b
+    elec_contrib_z = scale * np.array(elec_change[2]) * lattice.c
+
+    return np.array([elec_contrib_x, elec_contrib_y, elec_contrib_z]) # muC / cm^2
+
+
+def polarization_cartesian(components, lattice):
+    """The Cartesian polarization vector from components along the unit
+    lattice vectors a/|a|, b/|b|, c/|c|.
+
+    The components are not Cartesian unless the cell is orthogonal, so
+    their own norm is not |P|: for rhombohedral LiNbO3 it is 0.69 |P|.
+    """
+    a, b, c = lattice.matrix
+    a, b, c = a / np.linalg.norm(a), b / np.linalg.norm(b), c / np.linalg.norm(c)
+    return a * components[0] + b * components[1] + c * components[2]
+
+
+def polarization_norm(components, lattice):
+    """|P| from components along the unit lattice vectors."""
+    return np.linalg.norm(polarization_cartesian(components, lattice))
+
+
+# Two structures count as the same image of a chain within this many
+# angstroms per site, across the periodic boundaries, and per lattice-vector
+# component. They come from the same DFT run, read by two parses, so they
+# agree far more closely than this.
+CHAIN_STRUCT_ATOL = 1e-4
+
+
+def _same_structure(a, b, atol=CHAIN_STRUCT_ATOL):
+    if len(a) != len(b) or [str(s.specie) for s in a] != [str(s.specie) for s in b]:
+        return False
+    if not np.allclose(a.lattice.matrix, b.lattice.matrix, rtol=0, atol=atol):
+        return False
+    vecs = pbc_shortest_vectors(a.lattice, a.frac_coords, b.frac_coords)
+    return max(np.linalg.norm(vecs[i][i]) for i in range(len(a))) <= atol
+
+
+def chain_polarization(parse_dicts, eig_thresh=EIG_THRESH, sing_val_thresh=SING_VAL_THRESH):
+    """Polarization change along a chain of interpolated images.
+
+    When the polar and non-polar structures are too far apart for one pair
+    (see preprocess.preprocess_structs), the change is computed along the
+    chain pol -> image 1 -> ... -> np, one adjacent pair at a time. Only the
+    electronic part is summed over the pairs, as BFDJobs does: each pair's
+    Berry phases are small and on a definite branch, and their sum follows
+    the path. The ionic part is computed once, from the two ends.
+
+    Parameters
+    ----------
+    parse_dicts : iterable of dict
+        The parser output (VASPParser.vasp_parser or QEParser.qe_parser) of
+        each adjacent pair in order: (pol, image 1), (image 1, image 2), ...,
+        (image n, np), each pair parsed with its first structure as the
+        polar one. A generator is fine, and for VASP better: only one pair
+        is held at a time, and a parsed pair can be gigabytes.
+    eig_thresh, sing_val_thresh
+        Passed to each pair's Overlaps.
+
+    Returns
+    -------
+    dict
+        polarization_norm : |P| in muC/cm^2.
+        polarization_cartesian : P as a Cartesian vector in muC/cm^2.
+        polarization_components, elec_contrib, ion_contrib : components
+            along the unit lattice vectors of the polar structure, in
+            muC/cm^2, as Overlaps logs them.
+        elec_change_per_pair : each pair's Overlaps.electronic_change.
+        debug_per_pair : each pair's compute_string_sums debug output.
+
+    Raises
+    ------
+    ValueError
+        If the chain is empty, if one pair's second structure is not the
+        next pair's first, or if the pairs differ in spin polarization or
+        valence charges.
+
+    Notes
+    -----
+    The summed electronic change is converted with the polar structure's
+    lattice, as BFDJobs does. That is exact when every image has the same
+    lattice; with interpolated lattices it is an approximation.
+    """
+    first_pol = last_np = zval_dict = spin_pol = None
+    elec_total = np.zeros(3)
+    elec_per_pair, debug_per_pair = [], []
+
+    for index, parse_dict in enumerate(parse_dicts):
+        if index == 0:
+            first_pol = parse_dict["pol_struct"]
+            zval_dict, spin_pol = parse_dict["zval_dict"], parse_dict["spin_pol"]
+        else:
+            if not _same_structure(last_np, parse_dict["pol_struct"]):
+                raise ValueError(
+                    f"pair {index - 1}'s second structure is not pair {index}'s first: "
+                    f"the pairs must run pol -> image 1 -> ... -> np, each sharing an "
+                    f"image with the next")
+            if parse_dict["spin_pol"] != spin_pol:
+                raise ValueError(f"pair {index} differs from pair 0 in spin polarization")
+            if parse_dict["zval_dict"] != zval_dict:
+                raise ValueError(f"pair {index} has valence charges {parse_dict['zval_dict']}, "
+                                 f"pair 0 {zval_dict}")
+        last_np = parse_dict["np_struct"]
+
+        elec_change, dict_debug = Overlaps(parse_dict, eig_thresh=eig_thresh,
+                                           sing_val_thresh=sing_val_thresh).electronic_change()
+        logger.info("chain pair %d: electronic change %s", index, elec_change)
+        elec_per_pair.append(np.array(elec_change))
+        debug_per_pair.append(dict_debug)
+        elec_total += np.array(elec_change)
+        del parse_dict
+
+    if first_pol is None:
+        raise ValueError("the chain has no pairs")
+
+    lattice = first_pol.lattice
+    elec = electronic_contrib(elec_total, lattice)
+    ion = ionic_pol_change(first_pol, last_np, zval_dict)
+    components = ion + elec
+    cartesian = polarization_cartesian(components, lattice)
+
+    logger.info("chain of %d pairs: electronic contribution %s, ionic contribution %s",
+                len(elec_per_pair), elec, ion)
+    logger.info("chain polarization: %s muC / cm^2", np.linalg.norm(cartesian))
+    return {
+        "polarization_norm": float(np.linalg.norm(cartesian)),
+        "polarization_cartesian": cartesian,
+        "polarization_components": components,
+        "elec_contrib": elec,
+        "ion_contrib": ion,
+        "elec_change_per_pair": elec_per_pair,
+        "debug_per_pair": debug_per_pair,
+    }
