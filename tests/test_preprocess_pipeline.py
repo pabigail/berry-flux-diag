@@ -109,6 +109,74 @@ def test_translation_never_increases_the_displacement():
     assert out["trans_max_disp"] <= out["orig_max_disp"] + 1e-9
 
 
+# --- the displacement does not depend on the order of the structures -----
+
+def batio3_pair():
+    """The tutorial's BaTiO3 pair: tetragonal polar, cubic non-polar."""
+    species = ["Ba", "Ti", "O", "O", "O"]
+    pol = Structure(Lattice([[4.002006, 0, 0], [0, 4.002006, 0], [0, 0, 4.215507]]), species,
+                    [[0, 0, 0.020229], [0.5, 0.5, 0.538921], [0, 0.5, 0.492023],
+                     [0.5, 0, 0.492023], [0.5, 0.5, 0.970803]])
+    npl = Structure(Lattice.cubic(4.035583), species,
+                    [[0, 0, 0.0028], [0.5, 0.5, 0.5028], [0, 0.5, 0.5028],
+                     [0.5, 0, 0.5028], [0.5, 0.5, 0.0028]])
+    return pol, npl
+
+
+def test_the_displacement_is_symmetric_when_the_lattices_differ():
+    """It used to be measured in the first argument's lattice only, so
+    swapping the two gave 0.1523 against 0.1458 Angstrom for BaTiO3."""
+    pol, npl = batio3_pair()
+    assert preprocess.calc_max_disp(pol, npl) == preprocess.calc_max_disp(npl, pol)
+
+
+def test_the_displacement_is_the_larger_of_the_two_lattices():
+    pol, npl = batio3_pair()
+    in_each = [max(np.diag(s.lattice.get_all_distances(pol.frac_coords, npl.frac_coords)))
+               for s in (pol, npl)]
+    assert preprocess.calc_max_disp(pol, npl) == pytest.approx(max(in_each), abs=1e-12)
+
+
+def test_a_two_structure_pair_reports_one_displacement():
+    """With no images, the pair is its own only step: the translated and
+    adjacent displacements are one number, not two."""
+    pol, npl = batio3_pair()
+    out = preprocess.preprocess_structs(pol, npl)
+    assert len(out["structs"]) == 2
+    assert out["adj_max_disp"] == pytest.approx(out["trans_max_disp"], abs=1e-12)
+
+
+def test_the_translation_search_minimizes_the_reported_displacement():
+    """find_translation and calc_max_disp now use the same measure, so the
+    chosen shift is the best one on the grid by the number reported."""
+    pol, npl = batio3_pair()
+    shift = preprocess.find_translation(pol, npl)
+    best = preprocess.calc_max_disp(preprocess.translate_structs(pol, npl, shift), pol)
+    for trial in ([0.0, 0.0, 0.0], [0.0, 0.0, 0.01], [0.0, 0.0, -0.02]):
+        other = preprocess.translate_structs(pol, npl, np.array(trial))
+        assert best <= preprocess.calc_max_disp(other, pol) + 1e-12
+
+
+@pytest.mark.parametrize("max_disp", [0.05, 0.1, 0.2])
+def test_steps_respect_the_limit_when_the_lattices_differ(max_disp):
+    pol, npl = batio3_pair()
+    out = preprocess.preprocess_structs(pol, npl, max_disp=max_disp)
+    n = len(out["structs"]) - 1
+    assert out["adj_max_disp"] <= max_disp + 1e-9
+    assert out["adj_max_disp"] <= out["trans_max_disp"] / n + 1e-9
+
+
+def test_the_minimum_image_is_found_in_a_skewed_cell():
+    """Agrees with pymatgen's own minimum-image distance when the lattices
+    are the same, including across a boundary of a non-orthogonal cell."""
+    lattice = Lattice.from_parameters(4.1, 4.3, 4.6, 78.0, 84.0, 66.0)
+    a = Structure(lattice, ["Ba", "Ti"], [[0.98, 0.02, 0.5], [0.5, 0.5, 0.97]])
+    b = Structure(lattice, ["Ba", "Ti"], [[0.03, 0.96, 0.52], [0.47, 0.55, 0.04]])
+    expected = np.diag(lattice.get_all_distances(a.frac_coords, b.frac_coords))
+    got = preprocess.site_displacements(a.frac_coords, lattice, b.frac_coords, lattice)
+    np.testing.assert_allclose(got, expected, rtol=0, atol=1e-12)
+
+
 # --- reading the pair from POSCAR files ----------------------------------
 
 def test_preprocess_poscars_reads_files(tmp_path):
