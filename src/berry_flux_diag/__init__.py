@@ -37,6 +37,7 @@ def configure_logging(level="INFO", stream=None):
 from . import constants
 from . import preprocess
 from . import utils
+from . import symmetry
 from . import Overlaps
 from . import VASPParser
 

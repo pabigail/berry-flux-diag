@@ -49,3 +49,6 @@ Thumbs.db
 *.swo
 
 
+
+# Inputs written by tutorials/preprocess_DFT_files.ipynb
+tutorials/bfd_inputs/

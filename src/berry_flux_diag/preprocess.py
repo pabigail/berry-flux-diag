@@ -82,29 +82,72 @@ def preprocess_POSCARS(pol_orig_POSCAR_file, np_orig_POSCAR_file, translate=True
                               max_disp=max_disp)
 
 
-def get_refined_oshift(st_a,st_b,grid_range=0.1):
-    max_disps = []
-    ogrid = product(np.arange(-grid_range,grid_range,0.01),
-                    np.arange(-grid_range,grid_range,0.01),
-                    np.arange(-grid_range,grid_range,0.01))
-    for oshift in ogrid:
-        st_a_copy = st_a.copy()
-        st_a_copy.translate_sites(range(len(st_a)),oshift)
-        max_disps.append([oshift,max(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords,
-                                                                                 st_b.frac_coords)))])
-    return max_disps
+# Every image within one cell of the nearest one, for the minimum-image search.
+_IMAGES = np.array(list(product((-1, 0, 1), repeat=3)), dtype=float)
+
+
+def site_displacements(frac_a, lattice_a, frac_b, lattice_b):
+    """How far each site moves between two structures, in Angstrom.
+
+    Site i of one structure is paired with site i of the other. Each
+    distance is the minimum-image distance, measured in *both* lattices,
+    and the larger of the two is kept. So the result does not depend on
+    which structure comes first.
+
+    It used to be measured in the first structure's lattice only.
+    When the two lattices differ (BaTiO3: cubic against tetragonal), that
+    makes the distance depend on the argument order. The two places that
+    measured it put the structures in opposite orders, so the same pair
+    was reported as 0.1523 A by one and 0.1458 A by the other.
+
+    Taking the larger also keeps the interpolation guarantee: images are
+    interpolated linearly in fractional coordinates and in the lattice.
+    A step's fractional displacement is 1/n of the whole one, and its
+    length in any intermediate lattice is at most the larger of its
+    lengths in the two end lattices, since a norm is convex. So a pair
+    within n * max_disp by this measure has every step within max_disp.
+
+    Parameters
+    ----------
+    frac_a, frac_b : (..., nsites, 3) arrays
+        Fractional coordinates. Leading dimensions broadcast, which lets
+        get_refined_oshift measure every trial shift at once.
+    lattice_a, lattice_b : pymatgen Lattice
+
+    Returns
+    -------
+    (..., nsites) array
+    """
+    d = np.asarray(frac_b, dtype=float) - np.asarray(frac_a, dtype=float)
+    d = d - np.round(d)
+    images = d[..., None, :] + _IMAGES  # (..., nsites, 27, 3)
+
+    def min_image_lengths(lattice):
+        cart = images @ lattice.matrix
+        return np.sqrt(np.min(np.sum(cart * cart, axis=-1), axis=-1))
+
+    return np.maximum(min_image_lengths(lattice_a), min_image_lengths(lattice_b))
+
+
+def get_refined_oshift(st_a, st_b, grid_range=0.1):
+    """Every trial shift of st_a on a 0.01 grid, with the largest site
+    displacement from st_b that it leaves, as [shift, max_disp] pairs."""
+    steps = np.arange(-grid_range, grid_range, 0.01)
+    shifts = np.array(list(product(steps, steps, steps)))
+    frac_a = st_a.frac_coords[None, :, :] + shifts[:, None, :]
+    max_disps = site_displacements(frac_a, st_a.lattice,
+                                   st_b.frac_coords, st_b.lattice).max(axis=1)
+    return [[tuple(shift), float(disp)] for shift, disp in zip(shifts, max_disps)]
 
 
 def calc_max_disp(struct_a, struct_b, trans=None):
-
+    """The largest site displacement between two structures, after
+    shifting struct_a by trans (fractional). Symmetric in the two
+    structures: see site_displacements."""
     if trans is None:
-        trans = np.array([0.0, 0.0, 0.0])
-    
-    st_a_copy = struct_a.copy()
-    st_a_copy.translate_sites(range(len(struct_a)),trans)
-    max_disp = max(np.diag(st_a_copy.lattice.get_all_distances(st_a_copy.frac_coords,
-                                                               struct_b.frac_coords)))
-    return max_disp
+        trans = np.zeros(3)
+    return float(site_displacements(struct_a.frac_coords + np.asarray(trans), struct_a.lattice,
+                                    struct_b.frac_coords, struct_b.lattice).max())
 
 
 def find_translation(pol_struct, np_struct):
@@ -129,18 +172,12 @@ def translate_structs(pol_struct, np_struct, translation=None):
 
 
 def max_atomic_displacement_between_adjacent_structs(structs):
+    """The largest site displacement between any two adjacent structures."""
     max_disp = 0.0
     for i in range(len(structs) - 1):
-        st_a = structs[i+1] # should re-write this so it is clearer, but max(diag(dist(A, B))) ≠ max(diag(dist(B, A)))
-        st_b = structs[i] # so made it consistent with pol vs np that computing distances between
-
-        if len(st_a) != len(st_b):
+        if len(structs[i]) != len(structs[i + 1]):
             raise ValueError(f"Structures at index {i} and {i+1} have different number of atoms.")
-
-        trans = np.array([0.0, 0.0, 0.0])
-        pair_disp = calc_max_disp(st_a, st_b, trans)
-        max_disp = max(max_disp, pair_disp)
-
+        max_disp = max(max_disp, calc_max_disp(structs[i], structs[i + 1]))
     return max_disp
 
 

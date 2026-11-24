@@ -20,13 +20,13 @@ LATTICE = np.array([[3.9, 0.0, 0.0], [0.1, 4.0, 0.0], [0.0, 0.2, 4.2]])
 ENCUT = 120.0
 
 
-def full_sphere_count(k):
-    b, nbmax = paw._setup(ENCUT, LATTICE)
+def full_sphere_count(k, lattice=LATTICE):
+    b, nbmax = paw._setup(ENCUT, lattice)
     return len(paw._g_sphere(np.asarray(k, float), nbmax, b, ENCUT))
 
 
 def write_wavecar(path, kpoints, nband=4, spin=1, kind="std", tag=45200, seed=0,
-                  filled=None):
+                  filled=None, occupations=None, lattice=None):
     """A WAVECAR in VASP's layout: a header record, a record with the
     counts, cutoff and lattice, then per spin and k-point a record of
     plane-wave count, k, and (Re E, Im E, occupation) per band, followed by
@@ -35,11 +35,13 @@ def write_wavecar(path, kpoints, nband=4, spin=1, kind="std", tag=45200, seed=0,
     By default the occupations are random, falling with band index. With
     filled, an insulator instead: that many full bands at every k-point
     (one int, or one per spin channel) and a gap of at least 0.6 above
-    them."""
+    them. occupations, (spin, nk, nband), then replaces the occupations.
+    lattice defaults to LATTICE."""
+    lattice = LATTICE if lattice is None else np.asarray(lattice, dtype=float)
     rng = np.random.default_rng(seed)
     counts = []
     for k in kpoints:
-        full = full_sphere_count(k)
+        full = full_sphere_count(k, lattice)
         counts.append({"std": full, "ncl": 2 * full, "gam": (full + 1) // 2}[kind])
     recl8 = max(13, 4 + 3 * nband, max(counts))
     records = []
@@ -51,7 +53,7 @@ def write_wavecar(path, kpoints, nband=4, spin=1, kind="std", tag=45200, seed=0,
         records.append(buf)
 
     record([recl8 * 8, spin, tag])
-    record([len(kpoints), nband, ENCUT, *LATTICE.ravel(), 0.0])
+    record([len(kpoints), nband, ENCUT, *lattice.ravel(), 0.0])
     band_energy = []
     for s in range(spin):
         for k, nplane in zip(kpoints, counts):
@@ -65,6 +67,8 @@ def write_wavecar(path, kpoints, nband=4, spin=1, kind="std", tag=45200, seed=0,
                 n = filled[s] if np.ndim(filled) else filled
                 occ = (np.arange(nband) < n).astype(float)
                 energies = np.arange(nband) + rng.uniform(-0.2, 0.2, size=nband)
+            if occupations is not None:
+                occ = np.asarray(occupations[s][len(band_energy) % len(kpoints)], dtype=float)
             e = np.column_stack([energies, np.zeros(nband), occ])
             band_energy.append(e)
             record([nplane, *k, *e.ravel()])
